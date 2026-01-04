@@ -1,0 +1,5 @@
+neo4j>=5.18.0
+pandas>=2.1.0
+pyarrow>=15.0.0
+requests>=2.31.0
+kafka-python>=2.0.2

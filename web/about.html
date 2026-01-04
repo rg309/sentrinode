@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About Sentrinode</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        electric: '#3b82f6',
+                        neon: '#a855f7',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Inter var', 'system-ui'],
+                    },
+                },
+            },
+        };
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-black text-gray-400">
+    <header class="sticky top-0 z-30 border-b border-white/5 bg-black/80 backdrop-blur-2xl">
+        <nav class="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-5">
+            <a href="index.html" class="logo text-sm font-semibold tracking-[0.6em] text-white">SENTRINODE</a>
+            <div class="hidden items-center gap-6 text-xs tracking-[0.4em] uppercase md:flex">
+                <a href="index.html">Home</a>
+                <a href="features.html">How it works</a>
+                <a href="about.html" class="text-white">About</a>
+                <a href="engage.html">Engage</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="mx-auto max-w-6xl space-y-20 px-6 py-20">
+        <section class="space-y-4" data-reveal>
+            <p class="text-xs uppercase tracking-[0.7em] text-white/60">About us</p>
+            <h1 class="text-4xl text-white sm:text-5xl">Built for the engineers who carry the night shift.</h1>
+            <p class="max-w-3xl text-lg text-gray-300">Sentrinode exists because every latency story we lived started at 3 a.m. when dashboards were red, phones were buzzing, and leadership still demanded perfect clarity. This is our answer: graph-native intelligence that respects the humans behind the pager.</p>
+        </section>
+
+        <section class="grid gap-10 lg:grid-cols-[0.9fr,1.1fr]" data-reveal>
+            <div class="space-y-4">
+                <p class="text-xs uppercase tracking-[0.7em] text-white/60">Founder’s note</p>
+                <div class="rounded-[2.5rem] border border-white/10 bg-white/5 p-10 backdrop-blur-lg">
+                    <div class="mb-6 flex flex-wrap items-center gap-6">
+                        <div class="h-24 w-24 rounded-full border border-white/10 bg-gradient-to-br from-white/10 to-white/5"></div>
+                        <div>
+                            <p class="text-sm uppercase tracking-[0.5em] text-white/70">Founder & CEO</p>
+                            <p class="text-2xl text-white">Roy G.</p>
+                        </div>
+                    </div>
+                    <p class="text-xl leading-relaxed text-white">“SentriNode started because I was tired of watching brilliant SREs shoulder the 3 a.m. on-call pain while still being expected to brief the board by 8. We built a system that turns every propagation into an artifact leadership can trust—so the humans can breathe again.”</p>
+                </div>
+            </div>
+            <div class="rounded-[2.5rem] border border-white/10 bg-white/5 p-10 backdrop-blur-lg">
+                <p class="text-xs uppercase tracking-[0.6em] text-white/60">Story</p>
+                <p class="mt-6 text-2xl text-white">Building the calm before we scale.</p>
+                <p class="mt-4 text-gray-300">SentriNode is still in active development, born from countless late nights refining graph-native causality. We’re shaping the product with care, pairing Neo4j rigor with a minimalist aesthetic so propagation truth flows from terminal to boardroom.</p>
+                <p class="mt-6 text-gray-400">We build out of Charlotte with a tight crew of operators, graph engineers, and storytellers. If you’re obsessed with predictive latency mapping and premium design craft, we’d love to meet.</p>
+            </div>
+        </section>
+
+        <section class="space-y-8" data-reveal>
+            <div>
+                <p class="text-xs uppercase tracking-[0.7em] text-white/60">Our stack</p>
+                <h2 class="mt-3 text-3xl text-white">Standing on giants of infrastructure.</h2>
+                <p class="mt-3 text-gray-300">We proudly build on proven systems—the graph brilliance of Neo4j, the deployment calm of Docker, the expressive power of Python, and the instrumentation standard of OpenTelemetry.</p>
+            </div>
+            <div class="grid gap-6 rounded-[2rem] border border-white/10 bg-white/5 p-6 backdrop-blur-lg sm:grid-cols-2 lg:grid-cols-4">
+                <div class="flex flex-col items-center gap-3 text-center text-white">
+                    <div class="flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/30">
+                        <span class="text-xl font-semibold tracking-[0.2em]">Neo4j</span>
+                    </div>
+                    <p class="text-sm text-gray-400">Graph processing core</p>
+                </div>
+                <div class="flex flex-col items-center gap-3 text-center text-white">
+                    <div class="flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/30">
+                        <span class="text-xl font-semibold tracking-[0.2em]">Docker</span>
+                    </div>
+                    <p class="text-sm text-gray-400">Deterministic deployment</p>
+                </div>
+                <div class="flex flex-col items-center gap-3 text-center text-white">
+                    <div class="flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/30">
+                        <span class="text-xl font-semibold tracking-[0.2em]">Python</span>
+                    </div>
+                    <p class="text-sm text-gray-400">Learning + orchestration</p>
+                </div>
+                <div class="flex flex-col items-center gap-3 text-center text-white">
+                    <div class="flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/30">
+                        <span class="text-xs tracking-[0.4em]">OpenTelemetry</span>
+                    </div>
+                    <p class="text-sm text-gray-400">Signal ingestion standard</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-[2.5rem] border border-white/10 bg-gradient-to-br from-white/10 via-purple-500/10 to-blue-500/10 p-10 text-center" data-reveal>
+            <p class="text-xs uppercase tracking-[0.7em] text-white/70">Join us</p>
+            <h2 class="mt-4 text-4xl text-white">Help define latency intelligence for the next decade.</h2>
+            <p class="mt-3 text-gray-200">We’re hiring product-minded engineers, graph scientists, and design-forward storytellers. Say hello and tell us what keeps you up at 3 a.m.</p>
+            <div class="mt-8 flex flex-wrap justify-center gap-4">
+                <a href="mailto:contact@sentrinode.com" class="btn btn-primary magnetic">Send a note</a>
+                <a href="engage.html" class="btn btn-outline magnetic">See what we ship</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-white/5 bg-black/80 px-6 py-12 text-center text-sm text-gray-500">
+        <p class="text-xs uppercase tracking-[0.6em] text-white">SENTRINODE</p>
+        <div class="mt-4 flex justify-center gap-4 text-[0.65rem] uppercase tracking-[0.5em] text-gray-500">
+            <a href="index.html">Home</a>
+            <a href="features.html">How it works</a>
+            <a href="about.html">About</a>
+            <a href="engage.html">Engage</a>
+        </div>
+        <p class="mt-4 text-gray-500">© <span id="year"></span> Sentrinode Labs. Graph-native latency intelligence.</p>
+    </footer>
+
+    <script src="main.js" defer></script>
+</body>
+</html>

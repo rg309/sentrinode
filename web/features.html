@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sentrinode Platform — How It Works</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        electric: '#3b82f6',
+                        neon: '#a855f7',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Inter var', 'system-ui'],
+                    },
+                },
+            },
+        };
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-black text-gray-400">
+    <header class="sticky top-0 z-30 border-b border-white/5 bg-black/80 backdrop-blur-2xl">
+        <nav class="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-5">
+            <a href="index.html" class="logo text-sm font-semibold tracking-[0.6em] text-white">SENTRINODE</a>
+            <div class="hidden items-center gap-6 text-xs tracking-[0.4em] uppercase md:flex">
+                <a href="index.html">Home</a>
+                <a href="features.html" class="text-white">How it works</a>
+                <a href="about.html">About</a>
+                <a href="engage.html">Engage</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="mx-auto max-w-6xl space-y-28 px-6 py-20">
+        <section class="grid gap-12 lg:grid-cols-[1.05fr,0.95fr]" data-reveal>
+            <div class="space-y-10">
+                <div>
+                    <p class="text-xs uppercase tracking-[0.8em] text-white/60">Product · Technical deep-dive</p>
+                    <h1 class="mt-3 text-4xl text-white sm:text-5xl">How predictive latency mapping actually works.</h1>
+                    <p class="mt-4 max-w-3xl text-lg text-gray-300">This split-screen walkthrough is written for the skeptics and SREs. Left: the methodology. Right: the live Neo4j Cypher trace that proves the math.</p>
+                </div>
+                <div class="space-y-6">
+                    <article class="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md">
+                        <div class="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5">
+                            <svg class="h-6 w-6 text-electric" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h16" /></svg>
+                        </div>
+                        <p class="text-sm uppercase tracking-[0.5em] text-white/60">Stage 01</p>
+                        <h3 class="mt-2 text-2xl text-white">Deterministic ingest</h3>
+                        <p class="mt-2">We normalize OTLP spans, Kafka edge-events, and ledger hooks in under 400ms. Every event gets deterministic IDs and compliance guards.</p>
+                    </article>
+                    <article class="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md">
+                        <div class="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5">
+                            <svg class="h-6 w-6 text-neon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v4m0 12v4m10-8h-4M6 12H2m15.07-7.07-2.83 2.83M8.76 15.24l-2.83 2.83m0-13.66 2.83 2.83m8.48 8.48 2.83 2.83" /></svg>
+                        </div>
+                        <p class="text-sm uppercase tracking-[0.5em] text-white/60">Stage 02</p>
+                        <h3 class="mt-2 text-2xl text-white">Graph-based causality</h3>
+                        <p class="mt-2">Neo4j relationships encode propagation probability, service owners, and cumulative latency. We run Monte Carlo drift to see how far the blast will travel.</p>
+                    </article>
+                    <article class="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md">
+                        <div class="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5">
+                            <svg class="h-6 w-6 text-electric" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
+                        </div>
+                        <p class="text-sm uppercase tracking-[0.5em] text-white/60">Stage 03</p>
+                        <h3 class="mt-2 text-2xl text-white">Actionable propagation</h3>
+                        <p class="mt-2">We surface only the causal paths above your risk tolerance. Each path renders with owners, runbooks, and impact deltas ready for the board.</p>
+                    </article>
+                </div>
+            </div>
+            <div class="space-y-6 lg:sticky lg:top-24">
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <span class="terminal-dot bg-red-400"></span>
+                        <span class="terminal-dot bg-yellow-400"></span>
+                        <span class="terminal-dot bg-green-400"></span>
+                        <span class="ml-auto text-[0.65rem] uppercase tracking-[0.6em] text-white/50">neo4j@latency-core</span>
+                    </div>
+                    <div class="terminal-body">
+                        <code data-terminal-text="MATCH (span:Span {trace_id: $traceId})-[:PROPAGATES*1..5]->(blast:Service)&#10;WITH span, blast, reduce(lat=0, rel IN relationships(path) | lat + rel.latency_ms) AS drag&#10;WHERE drag > $slo_budget&#10;MATCH (blast)-[:OWNED_BY]->(team:Team)&#10;RETURN span.span_id AS origin, blast.name AS at_risk, drag AS drift_ms, team.pagerduty AS on_call&#10;ORDER BY drag DESC LIMIT 5;" aria-live="polite"></code>
+                    </div>
+                </div>
+                <div class="rounded-3xl border border-white/10 bg-white/5 p-6">
+                    <p class="text-sm uppercase tracking-[0.5em] text-white/70">Sticky context</p>
+                    <p class="mt-2 text-gray-300">Scroll the explanatory column. The Cypher stays pinned so SREs can validate every claim against the raw query.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid gap-12 lg:grid-cols-2" data-reveal>
+            <div class="space-y-4">
+                <p class="text-xs uppercase tracking-[0.6em] text-white/60">Subsystem detail</p>
+                <h2 class="text-4xl text-white">What happens inside each hop.</h2>
+                <p class="text-gray-300">Split-screen clarity extends to the subsystem view. Each hop is treated as a first-class citizen with deterministic IDs and determinism checks.</p>
+            </div>
+            <div class="grid gap-6 sm:grid-cols-2">
+                <article class="rounded-3xl border border-white/10 bg-white/5 p-5">
+                    <p class="text-sm uppercase tracking-[0.5em] text-white/60">Edge validation</p>
+                    <h3 class="mt-2 text-xl text-white">Proxy waveform</h3>
+                    <p class="mt-2 text-gray-400">Istio + Envoy signatures confirm request lineage before graph ingestion.</p>
+                </article>
+                <article class="rounded-3xl border border-white/10 bg-white/5 p-5">
+                    <p class="text-sm uppercase tracking-[0.5em] text-white/60">Causality</p>
+                    <h3 class="mt-2 text-xl text-white">Propagation tensor</h3>
+                    <p class="mt-2 text-gray-400">Neo4j path scoring fuses SLO budgets, owner escalation, and Monte Carlo drift.</p>
+                </article>
+                <article class="rounded-3xl border border-white/10 bg-white/5 p-5">
+                    <p class="text-sm uppercase tracking-[0.5em] text-white/60">Narratives</p>
+                    <h3 class="mt-2 text-xl text-white">Executive binder</h3>
+                    <p class="mt-2 text-gray-400">Outputs board decks with trace anatomy, mitigation, and finance deltas.</p>
+                </article>
+                <article class="rounded-3xl border border-white/10 bg-white/5 p-5">
+                    <p class="text-sm uppercase tracking-[0.5em] text-white/60">Feedback</p>
+                    <h3 class="mt-2 text-xl text-white">Runbook router</h3>
+                    <p class="mt-2 text-gray-400">Feeds Jira/Linear/PagerDuty with zero manual correlation.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="space-y-10" data-reveal>
+            <div class="flex flex-col gap-4">
+                <p class="text-xs uppercase tracking-[0.6em] text-white/60">The anatomy of a trace</p>
+                <h2 class="text-4xl text-white">Visualize the propagation mesh.</h2>
+                <p class="max-w-3xl text-gray-300">When the page loads, the data flow animates between microservices. Every line is powered by Framer Motion to prove where the milliseconds go.</p>
+            </div>
+            <div id="trace-diagram" class="prop-map p-8" aria-live="polite">
+                <svg viewBox="0 0 420 280" class="h-full w-full">
+                    <defs>
+                        <linearGradient id="trace-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#3b82f6" />
+                            <stop offset="100%" stop-color="#a855f7" />
+                        </linearGradient>
+                    </defs>
+                    <line x1="60" y1="150" x2="150" y2="70" class="trace-line" style="animation-delay:0.1s"></line>
+                    <line x1="60" y1="150" x2="150" y2="220" class="trace-line" style="animation-delay:0.25s"></line>
+                    <line x1="150" y1="70" x2="260" y2="120" class="trace-line" style="animation-delay:0.4s"></line>
+                    <line x1="150" y1="220" x2="260" y2="120" class="trace-line" style="animation-delay:0.55s"></line>
+                    <line x1="260" y1="120" x2="330" y2="200" class="trace-line" style="animation-delay:0.7s"></line>
+                    <line x1="260" y1="120" x2="360" y2="150" class="trace-line" style="animation-delay:0.85s"></line>
+                    <line x1="330" y1="200" x2="360" y2="150" class="trace-line" style="animation-delay:1s"></line>
+
+                    <g class="trace-node" style="animation-delay:0.2s">
+                        <circle cx="60" cy="150" r="18" fill="#3b82f6" fill-opacity="0.9"></circle>
+                        <text x="60" y="190" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Gateway</text>
+                    </g>
+                    <g class="trace-node" style="animation-delay:0.35s">
+                        <circle cx="150" cy="70" r="16" fill="#a855f7" fill-opacity="0.85"></circle>
+                        <text x="150" y="110" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Ingest</text>
+                    </g>
+                    <g class="trace-node" style="animation-delay:0.5s">
+                        <circle cx="150" cy="220" r="18" fill="#3b82f6" fill-opacity="0.85"></circle>
+                        <text x="150" y="260" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Rule</text>
+                    </g>
+                    <g class="trace-node" style="animation-delay:0.65s">
+                        <circle cx="260" cy="120" r="20" fill="#a855f7" fill-opacity="0.9"></circle>
+                        <text x="260" y="160" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Graph</text>
+                    </g>
+                    <g class="trace-node" style="animation-delay:0.85s">
+                        <circle cx="330" cy="200" r="16" fill="#3b82f6" fill-opacity="0.8"></circle>
+                        <text x="330" y="238" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Finance</text>
+                    </g>
+                    <g class="trace-node" style="animation-delay:1s">
+                        <circle cx="360" cy="150" r="18" fill="#a855f7" fill-opacity="0.85"></circle>
+                        <text x="360" y="190" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12" letter-spacing="0.1em">Deck</text>
+                    </g>
+                </svg>
+                <div class="mt-6 grid gap-3 text-xs uppercase tracking-[0.4em] text-white/60 sm:grid-cols-3">
+                    <span class="rounded-full border border-white/10 px-4 py-2 text-center">Gateway</span>
+                    <span class="rounded-full border border-white/10 px-4 py-2 text-center">Graph Core</span>
+                    <span class="rounded-full border border-white/10 px-4 py-2 text-center">Board Deck</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-[2.5rem] border border-white/10 bg-white/5 p-10 text-center" data-reveal>
+            <h2 class="text-4xl text-white">Walk the full how-it-works stack with our architects.</h2>
+            <p class="mt-3 text-gray-300">We'll stream the Neo4j console, trace the mesh, and leave you with an action register.</p>
+            <div class="mt-8 flex flex-wrap justify-center gap-4">
+                <a href="engage.html" class="btn btn-primary magnetic">Schedule the walkthrough</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-white/5 bg-black/80 px-6 py-12 text-center text-sm text-gray-500">
+        <p class="text-xs uppercase tracking-[0.6em] text-white">SENTRINODE</p>
+        <div class="mt-4 flex justify-center gap-4 text-[0.65rem] uppercase tracking-[0.5em] text-gray-500">
+            <a href="index.html">Home</a>
+            <a href="features.html">How it works</a>
+            <a href="about.html">About</a>
+            <a href="engage.html">Engage</a>
+        </div>
+        <p class="mt-4 text-gray-500">© <span id="year"></span> Sentrinode Labs. Graph-native latency intelligence.</p>
+    </footer>
+
+    <script src="main.js" defer></script>
+</body>
+</html>
