@@ -10,7 +10,7 @@ This Python service computes training features by blending graph-derived context
 ## Layout
 ```
 feature-aggregator-python/
-├── main.py                     # CLI entrypoint
+├── app.py                      # CLI entrypoint
 ├── requirements.txt            # Python dependencies
 └── feature_aggregator/
     ├── config.py               # Environment-driven configuration
@@ -58,19 +58,19 @@ Environment variables drive all connections and scheduling:
 ## Usage
 ### Run Once
 ```
-python main.py --mode once
+python app.py --mode once
 ```
 
 ### Interval Scheduler
 ```
-FEATURE_AGGREGATOR_MODE=schedule SCHEDULE_INTERVAL_SECONDS=600 python main.py
+FEATURE_AGGREGATOR_MODE=schedule SCHEDULE_INTERVAL_SECONDS=600 python app.py
 ```
 
 ### Kafka Trigger
 ```
 export FEATURE_AGGREGATOR_MODE=kafka
 export KAFKA_TRIGGER_ENABLED=true
-python main.py
+python app.py
 ```
 Each Kafka message should be JSON like:
 ```json
@@ -93,7 +93,7 @@ The repository `docker-compose.yml` now includes Prometheus and the Feature Aggr
    ```
 4. When real service metrics become available, update `prometheus/prometheus.yml` targets and restart the stack.
 
-The aggregator runs in schedule mode by default (10 minute interval). Override by setting environment variables in `docker-compose.yml` or using `docker compose run feature-aggregator python main.py --mode once`.
+The aggregator runs in schedule mode by default (10 minute interval). Override by setting environment variables in `docker-compose.yml` or using `docker compose run feature-aggregator python app.py --mode once`.
 
 ## Feature Store Output
 - Location: `${FEATURE_STORE_PATH}` (default `feature_store/`).

@@ -8,9 +8,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY feature_aggregator ./feature_aggregator
-COPY main.py ./
+COPY app.py ./
 
 ENV FEATURE_STORE_PATH=/data/feature_store
 VOLUME /data/feature_store
 
-CMD ["python", "main.py"]
+CMD ["python", "app.py"]
