@@ -62,3 +62,21 @@ EOF
 # 5. Start the agent
 docker compose up -d
 echo "✅ SentriNode Agent is running locally and connected to your cloud!"
+
+# Add a 'sentrinode' command to the user's Mac
+create_cli_shortcut() {
+    sudo tee /usr/local/bin/sentrinode > /dev/null <<'EOF'
+#!/bin/bash
+if [ "$1" == "update" ]; then
+    echo "🔄 Updating SentriNode Agent..."
+    curl -sSL https://raw.githubusercontent.com/rg309/sentrinode/main/install.sh | bash -s -- $SENTRINODE_KEY
+else
+    echo "SentriNode CLI"
+    echo "Usage: sentrinode [update]"
+fi
+EOF
+    sudo chmod +x /usr/local/bin/sentrinode
+}
+
+# Run it during installation
+create_cli_shortcut
