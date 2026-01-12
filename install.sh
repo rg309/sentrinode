@@ -65,21 +65,23 @@ echo "✅ SentriNode Agent is running locally and connected to your cloud!"
 
 # Add a 'sentrinode' command to the user's Mac
 create_cli_shortcut() {
-    # Save the key so 'update' can find it later
+    # 1. Save the key to a hidden file for 'sentrinode update' to remember
     echo "$1" > ~/.sentrinode_key
 
+    # 2. Create the sentrinode command
     sudo tee /usr/local/bin/sentrinode > /dev/null <<'EOF'
 #!/bin/bash
-# Read the saved key
-KEY=$(cat ~/.sentrinode_key 2>/dev/null)
+# Read the saved key from the memory file
+SAVED_KEY=$(cat ~/.sentrinode_key 2>/dev/null)
 
 if [ "$1" == "update" ]; then
-    if [ -z "$KEY" ]; then
-        echo "❌ Error: No saved API Key found. Please run the full curl install again."
+    if [ -z "$SAVED_KEY" ]; then
+        echo "❌ Error: No saved API Key found. Run the curl install once with your key."
         exit 1
     fi
     echo "🔄 Updating SentriNode Agent..."
-    curl -sSL https://raw.githubusercontent.com/rg309/sentrinode/main/install.sh | bash -s -- "$KEY"
+    # Piped update using the remembered key
+    curl -sSL https://raw.githubusercontent.com/rg309/sentrinode/main/install.sh | bash -s -- "$SAVED_KEY"
 else
     echo "SentriNode CLI"
     echo "Usage: sentrinode update"
