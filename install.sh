@@ -21,12 +21,21 @@ services:
   sentrinode-agent:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: sentrinode-agent
+    # Run as root so it can read system logs
+    user: "0:0"
     command: ["--config=/etc/otel-config.yaml"]
     volumes:
       - ./otel-config.yaml:/etc/otel-config.yaml
+      # These 3 lines allow it to see your Mac's health & logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - /:/hostfs:ro
     ports:
-      - "4317:4317"
-      - "4318:4318"
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "14250:14250" # Jaeger
+      - "9411:9411"   # Zipkin
+      - "8888:8888"   # Prometheus Metrics
 EOF
 
 # 4. Create the OTel Config (Pointing to your Railway URL)
