@@ -1,10 +1,42 @@
+# --- Secrets & Config ---
 .env
-.streamlit/secrets.toml
-neo4j/
-neo4j_data/
-neo4j/
-neo4j_data/
-neo4j/
-neo4j_data/
-neo4j/
-neo4j_data/
+.env.local
+secrets.json
+*.pem
+credentials.md
+
+# --- Database (Neo4j) ---
+# Ignore local data if you run Neo4j Desktop
+data/
+logs/
+transactions/
+dbms/
+certificates/
+
+# --- OpenTelemetry ---
+# Ignore any local collector logs
+otel-collector.log
+
+# --- Backend Languages ---
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Go
+bin/
+dist/
+/vendor/
+
+# --- OS & Editors ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
