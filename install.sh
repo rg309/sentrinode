@@ -1,94 +1,99 @@
 #!/bin/bash
-# SentriNode Cloud-Native Installer
+set -euo pipefail
 
-echo "🚀 Starting SentriNode Installation..."
-
-# 1. Capture API Key
-API_KEY=$1
-if [ -z "$API_KEY" ]; then
-    echo "❌ Error: Missing API Key. Usage: curl ... | bash -s -- YOUR_KEY"
-    exit 1
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Error: Docker is not installed or not on PATH." >&2
+  exit 1
 fi
 
-# 2. Setup directory
-mkdir -p ~/.sentrinode
-cd ~/.sentrinode
+if ! command -v docker compose >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+  echo "Error: Docker Compose is not installed." >&2
+  exit 1
+fi
 
-# 3. Create the Docker Compose file locally
-cat <<EOF > docker-compose.yml
-version: '3.8'
+mkdir -p sentrinode/dashboard
+cd sentrinode
+
+cat <<'EOF' > dashboard/app.py
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import pandas as pd
+import streamlit as st
+from neo4j import GraphDatabase
+from neo4j.exceptions import Neo4jError, ServiceUnavailable
+
+st.set_page_config(page_title="SentriNode Console", layout="wide")
+
+NEO4J_URI = (os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/"))
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+
+def connect_neo4j():
+    try:
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        driver.verify_connectivity()
+        driver.close()
+        return True, "Connected to Neo4j"
+    except ServiceUnavailable:
+        return False, "Neo4j host unreachable"
+    except Neo4jError as exc:
+        return False, f"Neo4j error: {exc}"
+    except Exception as exc:
+        return False, f"Unexpected error: {exc}"
+
+connected, status = connect_neo4j()
+
+st.title("SentriNode Console")
+st.sidebar.header("Connection Status")
+icon = "🟢" if connected else "🔴"
+st.sidebar.write(f"{icon} {status}")
+st.sidebar.write(f"URI: `{NEO4J_URI}`")
+
+st.write("### Topology (Placeholder)")
+placeholder = pd.DataFrame(
+    [
+        {"service": "gateway", "dependency": "payments", "latency_ms": 180},
+        {"service": "payments", "dependency": "db-writer", "latency_ms": 240},
+    ]
+)
+st.dataframe(placeholder, width="stretch")
+EOF
+
+cat <<'EOF' > dashboard/Dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install --no-cache-dir streamlit neo4j pandas
+COPY . .
+EXPOSE 8501
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+EOF
+
+cat <<'EOF' > docker-compose.yaml
+version: "3.9"
 services:
-  sentrinode-agent:
-    image: otel/opentelemetry-collector-contrib:latest
-    container_name: sentrinode-agent
-    # Run as root so it can read system logs
-    user: "0:0"
-    command: ["--config=/etc/otel-config.yaml"]
-    volumes:
-      - ./otel-config.yaml:/etc/otel-config.yaml
-      # These 3 lines allow it to see your Mac's health & logs
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/log:/var/log:ro
-      - /:/hostfs:ro
+  sentrinode-console:
+    build: ./dashboard
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "14250:14250" # Jaeger
-      - "9411:9411"   # Zipkin
-      - "8888:8888"   # Prometheus Metrics
+      - "8501:8501"
+    environment:
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
 EOF
 
-# 4. Create the OTel Config (Pointing to your Railway URL)
-cat <<EOF > otel-config.yaml
-receivers:
-  otlp:
-    protocols:
-      grpc:
-      http:
-exporters:
-  otlp/sentrinode:
-    endpoint: "sentrinode-production.up.railway.app:4317" # Replace with your REAL Railway URL
-    tls:
-      insecure: true
-    headers:
-      "x-sentrinode-key": "$API_KEY"
-service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      exporters: [otlp/sentrinode]
-EOF
+read -r -p "Enter Railway Neo4j URI: " INPUT_URI
+read -r -s -p "Enter Railway Neo4j password: " INPUT_PASSWORD
+echo
 
-# 5. Start the agent
-docker compose up -d
-echo "✅ SentriNode Agent is running locally and connected to your cloud!"
+export NEO4J_URI="$INPUT_URI"
+export NEO4J_PASSWORD="$INPUT_PASSWORD"
 
-# Add a 'sentrinode' command to the user's Mac
-create_cli_shortcut() {
-    # 1. Save the key to a hidden file for 'sentrinode update' to remember
-    echo "$1" > ~/.sentrinode_key
-
-    # 2. Create the sentrinode command
-    sudo tee /usr/local/bin/sentrinode > /dev/null <<'EOF'
-#!/bin/bash
-# Read the saved key from the memory file
-SAVED_KEY=$(cat ~/.sentrinode_key 2>/dev/null)
-
-if [ "$1" == "update" ]; then
-    if [ -z "$SAVED_KEY" ]; then
-        echo "❌ Error: No saved API Key found. Run the curl install once with your key."
-        exit 1
-    fi
-    echo "🔄 Updating SentriNode Agent..."
-    # Piped update using the remembered key
-    curl -sSL https://raw.githubusercontent.com/rg309/sentrinode/main/install.sh | bash -s -- "$SAVED_KEY"
+if command -v docker compose >/dev/null 2>&1; then
+  docker compose up --build -d
 else
-    echo "SentriNode CLI"
-    echo "Usage: sentrinode update"
+  docker-compose up --build -d
 fi
-EOF
-    sudo chmod +x /usr/local/bin/sentrinode
-}
 
-# Run it during installation
-create_cli_shortcut "$API_KEY"
+echo "SentriNode Console is running."
+echo "Access it at http://localhost:8501"
