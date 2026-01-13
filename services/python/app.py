@@ -45,6 +45,12 @@ st.set_page_config(
 # -----------------------------------------------------------------------------
 SECRETS_FILE = Path(".streamlit") / "secrets.toml"
 BOOTSTRAP_FLAG_FILE = Path(".streamlit") / ".bootstrap_complete"
+ENV_CREDENTIAL_KEYS: dict[str, tuple[str, ...]] = {
+    "admin_user": ("SENTRINODE_ADMIN_USER", "SENTINEL_ADMIN_USER"),
+    "admin_pwd": ("SENTRINODE_ADMIN_PWD", "SENTINEL_ADMIN_PWD"),
+    "viewer_user": ("SENTRINODE_VIEWER_USER", "SENTINEL_VIEWER_USER"),
+    "viewer_pwd": ("SENTRINODE_VIEWER_PWD", "SENTINEL_VIEWER_PWD"),
+}
 _local_secrets_cache: dict[str, dict[str, Any]] | None = None
 
 
@@ -69,15 +75,20 @@ def _format_toml_value(value: Any) -> str:
 
 
 def _write_local_secrets(data: dict[str, dict[str, Any]]) -> None:
-    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lines: list[str] = []
-    for section, entries in data.items():
-        lines.append(f"[{section}]")
-        for key, value in entries.items():
-            lines.append(f"{key} = {_format_toml_value(value)}")
-        lines.append("")
-    SECRETS_FILE.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
-    _local_secrets_cache = copy.deepcopy(data)
+    global _local_secrets_cache
+    try:
+        SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        lines: list[str] = []
+        for section, entries in data.items():
+            lines.append(f"[{section}]")
+            for key, value in entries.items():
+                lines.append(f"{key} = {_format_toml_value(value)}")
+            lines.append("")
+        SECRETS_FILE.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        _local_secrets_cache = copy.deepcopy(data)
+    except OSError:
+        # Read-only environments (e.g., managed PaaS) can't persist secrets.
+        _local_secrets_cache = copy.deepcopy(data)
 
 
 def _section_to_dict(section: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -107,7 +118,10 @@ def _persist_credentials(new_creds: dict[str, str]) -> None:
         except Exception:  # pragma: no cover - streamlit-only object
             cache = {}
     cache["credentials"] = new_creds
-    _write_local_secrets(cache)
+    try:
+        _write_local_secrets(cache)
+    except OSError:
+        pass
     st.session_state["sentri_credentials"] = new_creds
     _mark_bootstrap_complete()
 
@@ -139,6 +153,19 @@ def _load_authorized_keys() -> list[str]:
     return unique
 
 
+def _load_env_credentials() -> dict[str, str]:
+    env_creds: dict[str, str] = {}
+    for field, options in ENV_CREDENTIAL_KEYS.items():
+        for env_key in options:
+            value = os.getenv(env_key)
+            if value:
+                env_creds[field] = value.strip()
+                break
+    if _credentials_configured(env_creds):
+        return env_creds
+    return {}
+
+
 AUTHORIZED_BOOTSTRAP_KEYS = _load_authorized_keys()
 
 
@@ -152,8 +179,11 @@ def _bootstrap_is_complete() -> bool:
 
 
 def _mark_bootstrap_complete() -> None:
-    BOOTSTRAP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    BOOTSTRAP_FLAG_FILE.write_text("ok", encoding="utf-8")
+    try:
+        BOOTSTRAP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BOOTSTRAP_FLAG_FILE.write_text("ok", encoding="utf-8")
+    except OSError:
+        pass
     st.session_state["bootstrap_verified"] = True
 
 st.markdown(
@@ -688,6 +718,12 @@ def _get_active_credentials() -> dict[str, str]:
         st.session_state["sentri_credentials"] = stored
         _mark_bootstrap_complete()
         return stored
+
+    env_creds = _load_env_credentials()
+    if env_creds:
+        st.session_state["sentri_credentials"] = env_creds
+        _mark_bootstrap_complete()
+        return env_creds
 
     return {}
 
