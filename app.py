@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import runpy
+import sys
 
 
 def main() -> None:
@@ -11,6 +13,11 @@ def main() -> None:
     target = root / "services" / "python" / "app.py"
     if not target.exists():
         raise FileNotFoundError(f"Dashboard entrypoint missing at {target}")
+    # Ensure the dashboard package directory is importable and mimic local cwd.
+    services_dir = target.parent
+    if str(services_dir) not in sys.path:
+        sys.path.insert(0, str(services_dir))
+    os.chdir(services_dir)
     runpy.run_path(str(target), run_name="__main__")
 
 
