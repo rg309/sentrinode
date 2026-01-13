@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable
 from streamlit_autorefresh import st_autorefresh
 try:
     from streamlit_agraph import Config, Edge, Node, agraph
@@ -1371,9 +1372,17 @@ elif nav_choice == "Edge Network Map":
             help="Drag to inspect historical network states.",
         )
         focus_mode = st.checkbox("Focus Mode (hide unrelated nodes)")
-        edges_data, node_stats = ge.fetch_topology(
-            driver, minutes_back=minutes_back, limit=400, tenant_id=tenant_id
-        )
+        try:
+            edges_data, node_stats = ge.fetch_topology(
+                driver, minutes_back=minutes_back, limit=400, tenant_id=tenant_id
+            )
+        except ServiceUnavailable as exc:
+            st.error(
+                "Failed to reach Neo4j. Update NEO4J_URI/NEO4J_{USER,PASSWORD} to point at a reachable instance "
+                "or run `docker compose up sentri-db` locally."
+            )
+            st.caption(f"Driver error: {exc}")
+            st.stop()
         if not edges_data:
             st.info("No service relationships found for the selected time window.")
         else:
