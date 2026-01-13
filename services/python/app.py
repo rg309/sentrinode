@@ -110,7 +110,34 @@ def _persist_credentials(new_creds: dict[str, str]) -> None:
     st.session_state["sentri_credentials"] = new_creds
 
 
-BOOTSTRAP_API_KEY = get_secret_section("bootstrap").get("api_key") or os.getenv("SENTRINODE_BOOTSTRAP_KEY")
+def _parse_authorized_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    stringified = str(value).strip()
+    return [stringified] if stringified else []
+
+
+def _load_authorized_keys() -> list[str]:
+    bootstrap_section = get_secret_section("bootstrap")
+    combined: list[str] = []
+    secrets_value = bootstrap_section.get("authorized_keys") or bootstrap_section.get("api_key")
+    env_value = os.getenv("AUTHORIZED_KEYS") or os.getenv("SENTRINODE_BOOTSTRAP_KEY")
+    combined.extend(_parse_authorized_values(secrets_value))
+    combined.extend(_parse_authorized_values(env_value))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for key in combined:
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+    return unique
+
+
+AUTHORIZED_BOOTSTRAP_KEYS = _load_authorized_keys()
 
 st.markdown(
     """
@@ -649,19 +676,19 @@ def _get_active_credentials() -> dict[str, str]:
 
 def _run_initial_setup() -> None:
     st.sidebar.subheader("Initial Setup")
-    if not BOOTSTRAP_API_KEY:
+    if not AUTHORIZED_BOOTSTRAP_KEYS:
         st.sidebar.error(
-            "Set SENTRINODE_BOOTSTRAP_KEY or define [bootstrap] api_key inside .streamlit/secrets.toml to unlock setup."
+            "Set the AUTHORIZED_KEYS environment variable (or define [bootstrap] authorized_keys inside .streamlit/secrets.toml) to unlock setup."
         )
         st.stop()
 
     if not st.session_state.get("bootstrap_verified"):
         with st.sidebar.form("sentri-bootstrap-key"):
-            st.write("Enter the bootstrap API key to create dashboard credentials.")
+            st.write("Enter an authorized bootstrap key to create dashboard credentials.")
             key_value = st.text_input("Setup API Key", type="password")
             unlocked = st.form_submit_button("Unlock Setup")
         if unlocked:
-            if key_value.strip() == BOOTSTRAP_API_KEY:
+            if key_value.strip() in AUTHORIZED_BOOTSTRAP_KEYS:
                 st.session_state["bootstrap_verified"] = True
                 st.rerun()
             else:
@@ -1423,7 +1450,7 @@ elif nav_choice == "Admin Settings":
     else:
         st.subheader("Admin Settings")
         st.info(
-            "Use the bootstrap API key for initial access. Credential values live in .streamlit/secrets.toml while environment overrides (e.g., SENTRINODE_BOOTSTRAP_KEY) belong in .env."
+            "Use one of the AUTHORIZED_KEYS values for initial access. Credential values live in .streamlit/secrets.toml while environment overrides (e.g., AUTHORIZED_KEYS) belong in .env."
         )
         pdf_bytes = build_weekly_health_pdf(metrics, trace_df)
         st.download_button(
@@ -1460,7 +1487,7 @@ elif nav_choice == "Admin Settings":
             """
             **Env & Secrets**
 
-            - `.env` stores local-only environment overrides (e.g., SENTRINODE_BOOTSTRAP_KEY, Neo4j URI/credentials).
+            - `.env` stores local-only environment overrides (e.g., AUTHORIZED_KEYS, Neo4j URI/credentials).
             - `.streamlit/secrets.toml` is the canonical store for dashboard credentials and bootstrap API keys.
             - Update both when rotating secrets to avoid drift across environments.
             """

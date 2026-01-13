@@ -8,7 +8,7 @@
 
 ### Initial Dashboard Login
 
-The Streamlit UI now boots in a "setup" mode. Provide the bootstrap API key (set `SENTRINODE_BOOTSTRAP_KEY` in `.env` or `[bootstrap] api_key` in `.streamlit/secrets.toml`) to unlock the credential wizard, then choose your own admin/viewer usernames and passwords. Those credentials are written back to `.streamlit/secrets.toml` and become the only way to sign in going forward. Keep both the secrets file and `.env` out of source control.
+The Streamlit UI now boots in a "setup" mode. Provide one of the bootstrap keys listed in the `AUTHORIZED_KEYS` environment variable (or `[bootstrap] authorized_keys` inside `.streamlit/secrets.toml`) to unlock the credential wizard, then choose your own admin/viewer usernames and passwords. You can provide a comma-separated list of keys for multiple operators. Those credentials are written back to `.streamlit/secrets.toml` and become the only way to sign in going forward. Keep both the secrets file and `.env` out of source control.
 
 ### Build Go services
 
