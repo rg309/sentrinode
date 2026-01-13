@@ -2,12 +2,15 @@
 """SentriNode Cloudflare-style dashboard demo built with Streamlit."""
 from __future__ import annotations
 
+import copy
 import os
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any, Mapping
+import tomllib
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -36,6 +39,78 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# -----------------------------------------------------------------------------
+# Secret helpers + credential bootstrap
+# -----------------------------------------------------------------------------
+SECRETS_FILE = Path(".streamlit") / "secrets.toml"
+_local_secrets_cache: dict[str, dict[str, Any]] | None = None
+
+
+def _load_local_secrets() -> dict[str, dict[str, Any]]:
+    global _local_secrets_cache
+    if _local_secrets_cache is None:
+        try:
+            with SECRETS_FILE.open("rb") as file_obj:
+                _local_secrets_cache = tomllib.load(file_obj)
+        except FileNotFoundError:
+            _local_secrets_cache = {}
+    return _local_secrets_cache
+
+
+def _format_toml_value(value: Any) -> str:
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _write_local_secrets(data: dict[str, dict[str, Any]]) -> None:
+    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for section, entries in data.items():
+        lines.append(f"[{section}]")
+        for key, value in entries.items():
+            lines.append(f"{key} = {_format_toml_value(value)}")
+        lines.append("")
+    SECRETS_FILE.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    _local_secrets_cache = copy.deepcopy(data)
+
+
+def _section_to_dict(section: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not section:
+        return {}
+    return {key: section[key] for key in section}
+
+
+def get_secret_section(name: str) -> dict[str, Any]:
+    local = _load_local_secrets().get(name)
+    if local:
+        return dict(local)
+    return _section_to_dict(st.secrets.get(name))
+
+
+def _credentials_configured(creds: Mapping[str, Any] | None) -> bool:
+    if not creds:
+        return False
+    return all(creds.get(field) for field in ("admin_user", "admin_pwd", "viewer_user", "viewer_pwd"))
+
+
+def _persist_credentials(new_creds: dict[str, str]) -> None:
+    cache = copy.deepcopy(_load_local_secrets())
+    if not cache:
+        try:
+            cache = {section: _section_to_dict(st.secrets[section]) for section in st.secrets}
+        except Exception:  # pragma: no cover - streamlit-only object
+            cache = {}
+    cache["credentials"] = new_creds
+    _write_local_secrets(cache)
+    st.session_state["sentri_credentials"] = new_creds
+
+
+BOOTSTRAP_API_KEY = get_secret_section("bootstrap").get("api_key") or os.getenv("SENTRINODE_BOOTSTRAP_KEY")
 
 st.markdown(
     """
@@ -542,7 +617,9 @@ def extract_selected_node(agraph_response: object) -> str | None:
 
 def send_sentri_alert(message: str, webhook_url: str | None) -> bool:
     if not webhook_url:
-        st.warning("Alert webhook not configured. Set SENTRINODE_ALERT_WEBHOOK or st.secrets['webhooks']['alert_url'].")
+        st.warning(
+            "Alert webhook not configured. Set SENTRINODE_ALERT_WEBHOOK or update the [webhooks] section in .streamlit/secrets.toml."
+        )
         return False
     try:
         response = requests.post(
@@ -554,7 +631,67 @@ def send_sentri_alert(message: str, webhook_url: str | None) -> bool:
         return True
     except requests.RequestException as exc:
         st.warning(f"Alert delivery failed: {exc}")
-        return False
+    return False
+
+
+def _get_active_credentials() -> dict[str, str]:
+    cached = st.session_state.get("sentri_credentials")
+    if cached and _credentials_configured(cached):
+        return cached
+
+    stored = get_secret_section("credentials")
+    if _credentials_configured(stored):
+        st.session_state["sentri_credentials"] = stored
+        return stored
+
+    return {}
+
+
+def _run_initial_setup() -> None:
+    st.sidebar.subheader("Initial Setup")
+    if not BOOTSTRAP_API_KEY:
+        st.sidebar.error(
+            "Set SENTRINODE_BOOTSTRAP_KEY or define [bootstrap] api_key inside .streamlit/secrets.toml to unlock setup."
+        )
+        st.stop()
+
+    if not st.session_state.get("bootstrap_verified"):
+        with st.sidebar.form("sentri-bootstrap-key"):
+            st.write("Enter the bootstrap API key to create dashboard credentials.")
+            key_value = st.text_input("Setup API Key", type="password")
+            unlocked = st.form_submit_button("Unlock Setup")
+        if unlocked:
+            if key_value.strip() == BOOTSTRAP_API_KEY:
+                st.session_state["bootstrap_verified"] = True
+                st.rerun()
+            else:
+                st.sidebar.error("Invalid API key. Try again.")
+        st.stop()
+
+    st.sidebar.success("Setup unlocked. Create admin/viewer credentials.")
+    with st.sidebar.form("sentri-bootstrap-credentials"):
+        admin_user = st.text_input("Admin Username")
+        admin_pwd = st.text_input("Admin Password", type="password")
+        viewer_user = st.text_input("Viewer Username")
+        viewer_pwd = st.text_input("Viewer Password", type="password")
+        submitted = st.form_submit_button("Save Credentials")
+
+    if submitted:
+        proposed = {
+            "admin_user": admin_user.strip(),
+            "admin_pwd": admin_pwd,
+            "viewer_user": viewer_user.strip(),
+            "viewer_pwd": viewer_pwd,
+        }
+        if not _credentials_configured(proposed):
+            st.sidebar.error("All fields are required to create credentials.")
+        else:
+            _persist_credentials(proposed)
+            st.sidebar.success("Credentials saved. Sign in with your new account.")
+            st.session_state.pop("bootstrap_verified", None)
+            st.session_state.pop("role", None)
+            st.rerun()
+    st.stop()
 
 
 def check_neo4j_connection(uri: str, user: str, password: str) -> bool:
@@ -588,12 +725,11 @@ def draw_demo_graph() -> None:
 
 
 def require_authentication() -> str:
-    credentials = st.secrets.get("credentials", {})
-    stored_role = st.session_state.get("role")
+    credentials = _get_active_credentials()
     if not credentials:
-        st.sidebar.warning("Streamlit secrets missing credentials; defaulting to admin access.")
-        st.session_state["role"] = "admin"
-        return "admin"
+        _run_initial_setup()
+
+    stored_role = st.session_state.get("role")
 
     if stored_role:
         st.sidebar.success(f"Signed in as {stored_role.title()}")
@@ -638,8 +774,8 @@ nav_items = [
     ("Admin Settings", "[AD]"),
 ]
 
-neo4j_secret = st.secrets.get("neo4j", {})
-webhook_secret = st.secrets.get("webhooks", {})
+neo4j_secret = get_secret_section("neo4j")
+webhook_secret = get_secret_section("webhooks")
 NEO4J_URI = neo4j_secret.get("uri") or os.getenv("NEO4J_URI")
 NEO4J_USER = neo4j_secret.get("user") or os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = neo4j_secret.get("password") or os.getenv("NEO4J_PASSWORD")
@@ -1286,7 +1422,9 @@ elif nav_choice == "Admin Settings":
         st.error("Administrator access required.")
     else:
         st.subheader("Admin Settings")
-        st.info("Credentials live in .env and .streamlit/secrets.toml. Keep both files out of source control.")
+        st.info(
+            "Use the bootstrap API key for initial access. Credential values live in .streamlit/secrets.toml while environment overrides (e.g., SENTRINODE_BOOTSTRAP_KEY) belong in .env."
+        )
         pdf_bytes = build_weekly_health_pdf(metrics, trace_df)
         st.download_button(
             "Download Weekly Health PDF",
@@ -1294,13 +1432,37 @@ elif nav_choice == "Admin Settings":
             file_name="sentri_weekly_health.pdf",
             mime="application/pdf",
         )
+        with st.expander("Rotate Dashboard Credentials"):
+            current_creds = _get_active_credentials()
+            st.caption("Updating credentials logs everyone out immediately.")
+            with st.form("sentri-rotate-creds"):
+                admin_user = st.text_input("Admin Username", value=current_creds.get("admin_user", ""))
+                admin_pwd = st.text_input("Admin Password", type="password")
+                viewer_user = st.text_input("Viewer Username", value=current_creds.get("viewer_user", ""))
+                viewer_pwd = st.text_input("Viewer Password", type="password")
+                rotate_submitted = st.form_submit_button("Update Credentials")
+            if rotate_submitted:
+                new_values = {
+                    "admin_user": admin_user.strip(),
+                    "admin_pwd": admin_pwd,
+                    "viewer_user": viewer_user.strip(),
+                    "viewer_pwd": viewer_pwd,
+                }
+                if not _credentials_configured(new_values):
+                    st.error("All credential fields are required.")
+                else:
+                    _persist_credentials(new_values)
+                    st.success("Credentials updated. Please sign in again.")
+                    st.session_state.pop("role", None)
+                    st.session_state.pop("sentri_credentials", None)
+                    st.rerun()
         st.markdown(
             """
             **Env & Secrets**
 
-            - `.env` holds SENTINEL admin/viewer fallbacks plus Neo4j credentials for local development.
-            - `.streamlit/secrets.toml` provides the production-ready credential store used by `require_authentication`.
-            - Update them together when rotating passwords to avoid drift.
+            - `.env` stores local-only environment overrides (e.g., SENTRINODE_BOOTSTRAP_KEY, Neo4j URI/credentials).
+            - `.streamlit/secrets.toml` is the canonical store for dashboard credentials and bootstrap API keys.
+            - Update both when rotating secrets to avoid drift across environments.
             """
         )
         st.markdown(

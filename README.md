@@ -6,6 +6,10 @@
 2. Install dependencies (`pip install -r requirements.txt` for Python tooling, `go mod tidy` under `services/go` for Go services).
 3. Use `docker-compose up` to start the stack locally when needed.
 
+### Initial Dashboard Login
+
+The Streamlit UI now boots in a "setup" mode. Provide the bootstrap API key (set `SENTRINODE_BOOTSTRAP_KEY` in `.env` or `[bootstrap] api_key` in `.streamlit/secrets.toml`) to unlock the credential wizard, then choose your own admin/viewer usernames and passwords. Those credentials are written back to `.streamlit/secrets.toml` and become the only way to sign in going forward. Keep both the secrets file and `.env` out of source control.
+
 ### Build Go services
 
 Binaries are not checked in. Build them locally before running any Go-based services:
