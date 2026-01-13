@@ -16,24 +16,22 @@ processors:
   batch:
 
 exporters:
-  otlp/sentrinode:
+  otlp:
     endpoint: "sentrinode-production.up.railway.app:4317"
     headers:
       "x-sentrinode-key": "${API_KEY}"
-  debug:
-    verbosity: normal
 
 service:
   pipelines:
     traces:
       receivers: [otlp, jaeger, zipkin]
       processors: [batch]
-      exporters: [otlp/sentrinode, debug]
+      exporters: [otlp]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/sentrinode, debug]
+      exporters: [otlp]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/sentrinode, debug]
+      exporters: [otlp]
