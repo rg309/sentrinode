@@ -1,46 +1,16 @@
 receivers:
-  # 1. Modern standard
   otlp:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-
-  # 2. Legacy enterprise giants
   jaeger:
     protocols:
-      grpc:
-        endpoint: 0.0.0.0:14250
       thrift_http:
         endpoint: 0.0.0.0:14268
   zipkin:
     endpoint: 0.0.0.0:9411
-
-  # 3. Infrastructure king
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: 'sentrinode-gateway'
-          scrape_interval: 10s
-          static_configs:
-            - targets: ['0.0.0.0:8888']
-
-  # 4. Log specialist
-  filelog:
-    include: [ /var/log/*.log ]
-    start_at: end
-  fluentforward:
-    endpoint: 0.0.0.0:24224
-
-  # 5. System watcher
-  hostmetrics:
-    collection_interval: 30s
-    scrapers:
-      cpu:
-      memory:
-      disk:
-      network:
 
 processors:
   batch:
@@ -60,10 +30,10 @@ service:
       processors: [batch]
       exporters: [otlp/sentrinode, debug]
     metrics:
-      receivers: [otlp, prometheus, hostmetrics]
+      receivers: [otlp]
       processors: [batch]
       exporters: [otlp/sentrinode, debug]
     logs:
-      receivers: [otlp, filelog, fluentforward]
+      receivers: [otlp]
       processors: [batch]
       exporters: [otlp/sentrinode, debug]
