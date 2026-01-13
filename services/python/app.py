@@ -675,6 +675,7 @@ def _get_active_credentials() -> dict[str, str]:
 
 
 def _run_initial_setup() -> None:
+    _ensure_bootstrap_unlocked()
     st.sidebar.subheader("Initial Setup")
     st.sidebar.success("Bootstrap key accepted. Create admin/viewer credentials.")
     with st.sidebar.form("sentri-bootstrap-credentials"):
@@ -701,7 +702,7 @@ def _run_initial_setup() -> None:
     st.stop()
 
 
-def ensure_bootstrap_verified() -> None:
+def _ensure_bootstrap_unlocked() -> None:
     if st.session_state.get("bootstrap_verified"):
         return
     if not AUTHORIZED_BOOTSTRAP_KEYS:
@@ -756,7 +757,6 @@ def draw_demo_graph() -> None:
 
 
 def require_authentication() -> str:
-    ensure_bootstrap_verified()
     credentials = _get_active_credentials()
     if not credentials:
         _run_initial_setup()
