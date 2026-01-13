@@ -877,7 +877,8 @@ nav_items = [
 
 neo4j_secret = get_secret_section("neo4j")
 webhook_secret = get_secret_section("webhooks")
-NEO4J_URI = neo4j_secret.get("uri") or os.getenv("NEO4J_URI")
+raw_neo4j_uri = (neo4j_secret.get("uri") or os.getenv("NEO4J_URI") or "").strip()
+NEO4J_URI = raw_neo4j_uri or None
 NEO4J_USER = neo4j_secret.get("user") or os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = neo4j_secret.get("password") or os.getenv("NEO4J_PASSWORD")
 ALERT_WEBHOOK_URL = webhook_secret.get("alert_url") or os.getenv("SENTRINODE_ALERT_WEBHOOK")
@@ -979,7 +980,8 @@ else:
 
 st.sidebar.header("SentriNode Database")
 if st.sidebar.button("Test Graph Connection", key="test-neo4j"):
-    if check_neo4j_connection(NEO4J_URI or "bolt://sentrinode-db:7687", NEO4J_USER or "neo4j", NEO4J_PASSWORD or ""):
+    test_uri = (NEO4J_URI or "bolt://sentrinode-db:7687").strip()
+    if check_neo4j_connection(test_uri, NEO4J_USER or "neo4j", NEO4J_PASSWORD or ""):
         st.sidebar.success("Connected to Neo4j.")
 
 # Auto-refresh every 5 seconds
@@ -1183,7 +1185,7 @@ if nav_choice == "Overview":
             st.line_chart(
                 data=latency_df.set_index("timestamp"),
                 height=360,
-                use_container_width=True,
+                width="stretch",
             )
     with layout_right:
         st.subheader("Top Anomalous Nodes")
@@ -1192,7 +1194,7 @@ if nav_choice == "Overview":
         else:
             st.dataframe(
                 anomaly_df,
-                use_container_width=True,
+                width="stretch",
                 height=360,
             )
 
@@ -1216,7 +1218,7 @@ if nav_choice == "Overview":
                     "ai_recommendation",
                 ]
             ],
-            use_container_width=True,
+            width="stretch",
             height=360,
         )
 
@@ -1239,7 +1241,7 @@ elif nav_choice == "Analytics":
                     barmode="overlay",
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=40, b=10))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.warning("Plotly is not installed; showing aggregate counts instead.")
                 counts = (
@@ -1267,7 +1269,7 @@ elif nav_choice == "Analytics":
             ).round(2)
             st.dataframe(
                 blast_matrix.sort_values("anomaly_rate", ascending=False).head(15),
-                use_container_width=True,
+                width="stretch",
                 height=360,
             )
     with st.expander("Explainable AI feed"):
@@ -1288,7 +1290,7 @@ elif nav_choice == "Analytics":
                         "ai_recommendation",
                     ]
                 ],
-                use_container_width=True,
+                width="stretch",
                 height=380,
             )
     st.download_button(
@@ -1321,7 +1323,7 @@ elif nav_choice == "Security Events":
                     "ai_recommendation",
                 ]
             ],
-            use_container_width=True,
+            width="stretch",
             height=420,
         )
     st.info("Alerts push directly to Slack/Discord via the send_alert webhook in linker.py.")
@@ -1522,7 +1524,7 @@ elif nav_choice == "Graph Console":
         output = st.session_state.get("graph_console_results")
         if output:
             st.success(f"Returned {len(output)} row(s).")
-            st.dataframe(pd.DataFrame(output), use_container_width=True)
+            st.dataframe(pd.DataFrame(output), width="stretch")
         else:
             st.info("Results will appear here after you run a query.")
         st.caption("Need inspiration? Try `CALL db.schema.visualization()` or `MATCH (n) RETURN n LIMIT 5`.")
