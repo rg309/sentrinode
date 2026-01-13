@@ -44,6 +44,7 @@ st.set_page_config(
 # Secret helpers + credential bootstrap
 # -----------------------------------------------------------------------------
 SECRETS_FILE = Path(".streamlit") / "secrets.toml"
+BOOTSTRAP_FLAG_FILE = Path(".streamlit") / ".bootstrap_complete"
 _local_secrets_cache: dict[str, dict[str, Any]] | None = None
 
 
@@ -108,6 +109,7 @@ def _persist_credentials(new_creds: dict[str, str]) -> None:
     cache["credentials"] = new_creds
     _write_local_secrets(cache)
     st.session_state["sentri_credentials"] = new_creds
+    _mark_bootstrap_complete()
 
 
 def _parse_authorized_values(value: Any) -> list[str]:
@@ -138,6 +140,21 @@ def _load_authorized_keys() -> list[str]:
 
 
 AUTHORIZED_BOOTSTRAP_KEYS = _load_authorized_keys()
+
+
+def _bootstrap_is_complete() -> bool:
+    if st.session_state.get("bootstrap_verified"):
+        return True
+    if BOOTSTRAP_FLAG_FILE.exists():
+        st.session_state["bootstrap_verified"] = True
+        return True
+    return False
+
+
+def _mark_bootstrap_complete() -> None:
+    BOOTSTRAP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BOOTSTRAP_FLAG_FILE.write_text("ok", encoding="utf-8")
+    st.session_state["bootstrap_verified"] = True
 
 st.markdown(
     """
@@ -669,6 +686,7 @@ def _get_active_credentials() -> dict[str, str]:
     stored = get_secret_section("credentials")
     if _credentials_configured(stored):
         st.session_state["sentri_credentials"] = stored
+        _mark_bootstrap_complete()
         return stored
 
     return {}
@@ -703,7 +721,7 @@ def _run_initial_setup() -> None:
 
 
 def _ensure_bootstrap_unlocked() -> None:
-    if st.session_state.get("bootstrap_verified"):
+    if _bootstrap_is_complete():
         return
     if not AUTHORIZED_BOOTSTRAP_KEYS:
         st.sidebar.error(
