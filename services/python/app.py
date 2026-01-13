@@ -676,26 +676,7 @@ def _get_active_credentials() -> dict[str, str]:
 
 def _run_initial_setup() -> None:
     st.sidebar.subheader("Initial Setup")
-    if not AUTHORIZED_BOOTSTRAP_KEYS:
-        st.sidebar.error(
-            "Set the AUTHORIZED_KEYS environment variable (or define [bootstrap] authorized_keys inside .streamlit/secrets.toml) to unlock setup."
-        )
-        st.stop()
-
-    if not st.session_state.get("bootstrap_verified"):
-        with st.sidebar.form("sentri-bootstrap-key"):
-            st.write("Enter an authorized bootstrap key to create dashboard credentials.")
-            key_value = st.text_input("Setup API Key", type="password")
-            unlocked = st.form_submit_button("Unlock Setup")
-        if unlocked:
-            if key_value.strip() in AUTHORIZED_BOOTSTRAP_KEYS:
-                st.session_state["bootstrap_verified"] = True
-                st.rerun()
-            else:
-                st.sidebar.error("Invalid API key. Try again.")
-        st.stop()
-
-    st.sidebar.success("Setup unlocked. Create admin/viewer credentials.")
+    st.sidebar.success("Bootstrap key accepted. Create admin/viewer credentials.")
     with st.sidebar.form("sentri-bootstrap-credentials"):
         admin_user = st.text_input("Admin Username")
         admin_pwd = st.text_input("Admin Password", type="password")
@@ -715,9 +696,32 @@ def _run_initial_setup() -> None:
         else:
             _persist_credentials(proposed)
             st.sidebar.success("Credentials saved. Sign in with your new account.")
-            st.session_state.pop("bootstrap_verified", None)
             st.session_state.pop("role", None)
             st.rerun()
+    st.stop()
+
+
+def ensure_bootstrap_verified() -> None:
+    if st.session_state.get("bootstrap_verified"):
+        return
+    if not AUTHORIZED_BOOTSTRAP_KEYS:
+        st.sidebar.error(
+            "Set AUTHORIZED_KEYS (comma-separated) or configure [bootstrap] authorized_keys in .streamlit/secrets.toml to unlock the dashboard."
+        )
+        st.stop()
+
+    st.sidebar.subheader("Bootstrap Access")
+    with st.sidebar.form("sentri-bootstrap-key"):
+        st.write("Enter an authorized bootstrap key to unlock the dashboard.")
+        key_value = st.text_input("Setup API Key", type="password")
+        unlocked = st.form_submit_button("Unlock Dashboard")
+    if unlocked:
+        if key_value.strip() in AUTHORIZED_BOOTSTRAP_KEYS:
+            st.session_state["bootstrap_verified"] = True
+            st.sidebar.success("Bootstrap verified. Continue to sign in.")
+            st.rerun()
+        else:
+            st.sidebar.error("Invalid API key. Try again.")
     st.stop()
 
 
@@ -752,6 +756,7 @@ def draw_demo_graph() -> None:
 
 
 def require_authentication() -> str:
+    ensure_bootstrap_verified()
     credentials = _get_active_credentials()
     if not credentials:
         _run_initial_setup()
