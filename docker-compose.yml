@@ -1,229 +1,26 @@
+version: "3.9"
+
 services:
-  # 1. Kafka Broker and Zookeeper
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    container_name: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
-  kafka:
-    image: confluentinc/cp-kafka:7.6.0
-    container_name: kafka
-    depends_on: [zookeeper]
-    ports:
-      - "9092:9092"
-      - "9093:9093"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-
-  # 2. Neo4j Graph Database
-  neo4j:
-    image: neo4j:latest
-    container_name: neo4j
-    ports:
-      - "7474:7474" # Browser interface
-      - "7687:7687" # Bolt port
-    environment:
-      # SET A SECURE PASSWORD FOR PRODUCTION!
-      NEO4J_AUTH: neo4j/Delahrg12
-      # Optional: Enable metrics for later (Prometheus)
-      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+  sentrinode-agent:
+    image: otel/opentelemetry-collector-contrib:0.94.0
+    container_name: sentrinode-agent
+    command: ["--config=/etc/otel/config.yaml"]
     volumes:
-      - ./neo4j/data:/data
-
-  # 3. Prometheus time-series database
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-
-  # 4. Python Feature Aggregator
-  feature-aggregator:
-    build:
-      context: ./feature-aggregator-python
-    container_name: feature-aggregator
-    depends_on:
-      - kafka
-      - neo4j
-      - prometheus
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: testpassword
-      PROMETHEUS_URL: http://prometheus:9090
-      ENTRY_SERVICE: gateway
-      HIGH_RISK_SERVICES: payments,inventory,db
-      FEATURE_AGGREGATOR_MODE: schedule
-      SCHEDULE_INTERVAL_SECONDS: 600
-      KAFKA_TRIGGER_ENABLED: "false"
-      FEATURE_STORE_PATH: /data/feature_store
-    volumes:
-      - feature_store_data:/data/feature_store
-
-  # 5. OTLP ingestion (Go)
-  ingestion:
-    build:
-      context: ./ingestion-aggregator-go
-    container_name: ingestion
-    depends_on:
-      - kafka
+      - ./otel-config.yaml:/etc/otel/config.yaml:ro
     ports:
       - "4317:4317"
+      - "4318:4318"
 
-  # 6. Mock microservices
-  gateway:
+  sentrinode-ui:
     build:
-      context: ./mock-microservices
-    container_name: svc-gateway
+      context: .
+      dockerfile: Dockerfile
+    container_name: sentrinode-ui
     depends_on:
-      - orchestrator
-      - ingestion
+      - sentrinode-agent
     environment:
-      ORCHESTRATOR_URL: http://orchestrator:8001
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-      CPU_WORK_MS: 5
-    command: ["uvicorn", "services.gateway.app:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports:
-      - "8080:8000"
-
-  orchestrator:
-    build:
-      context: ./mock-microservices
-    container_name: svc-orchestrator
-    depends_on:
-      - payments
-      - inventory
-      - ingestion
-    environment:
-      PAYMENTS_URL: http://payments:8002
-      INVENTORY_URL: http://inventory:8003
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-    command: ["uvicorn", "services.orchestrator.app:app", "--host", "0.0.0.0", "--port", "8001"]
-    ports:
-      - "8001:8001"
-
-  payments:
-    build:
-      context: ./mock-microservices
-    container_name: svc-payments
-    depends_on:
-      - recommendation
-      - db
-      - ingestion
-    environment:
-      RECOMMENDATION_URL: http://recommendation:8004
-      DB_URL: http://db:8005
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-      CPU_WORK_MS: 10
-    command: ["uvicorn", "services.payments.app:app", "--host", "0.0.0.0", "--port", "8002"]
-    ports:
-      - "8002:8002"
-
-  inventory:
-    build:
-      context: ./mock-microservices
-    container_name: svc-inventory
-    depends_on:
-      - db
-      - ingestion
-    environment:
-      DB_URL: http://db:8005
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-      CPU_WORK_MS: 6
-    command: ["uvicorn", "services.inventory.app:app", "--host", "0.0.0.0", "--port", "8003"]
-    ports:
-      - "8003:8003"
-
-  recommendation:
-    build:
-      context: ./mock-microservices
-    container_name: svc-recommendation
-    depends_on:
-      - db
-      - ingestion
-    environment:
-      DB_URL: http://db:8005
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-    command: ["uvicorn", "services.recommendation.app:app", "--host", "0.0.0.0", "--port", "8004"]
-    ports:
-      - "8004:8004"
-
-  db:
-    build:
-      context: ./mock-microservices
-    container_name: svc-db
-    depends_on:
-      - ingestion
-    environment:
-      DB_BASE_LATENCY_MS: 25
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://ingestion:4317
-    command: ["uvicorn", "services.db.app:app", "--host", "0.0.0.0", "--port", "8005"]
-    ports:
-      - "8005:8005"
-
-  locust:
-    image: locustio/locust:2.24.1
-    container_name: locust
-    depends_on:
-      - gateway
-    volumes:
-      - ./mock-microservices/locustfile.py:/mnt/locust/locustfile.py:ro
-    command:
-      [
-        "-f",
-        "/mnt/locust/locustfile.py",
-        "--host",
-        "http://gateway:8000",
-        "--headless",
-        "-u",
-        "50",
-        "-r",
-        "5",
-      ]
-    ports:
-      - "8089:8089"
-
-  # SentriNode one-click demo stack
-  sentri-db:
-    image: neo4j:latest
-    container_name: sentrinode-db
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      - NEO4J_AUTH=neo4j/Delahrg12
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_memory_heap_initial__size=512m
-      - NEO4J_dbms_memory_heap_max__size=1G
-    volumes:
-      - ./neo4j_data:/data
-
-  sentri-ui:
-    build: .
-    container_name: sentrinode-app
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
     ports:
       - "8501:8501"
-    depends_on:
-      - sentri-db
-    environment:
-      - SENTRINODE_ALERT_WEBHOOK=${SENTRINODE_ALERT_WEBHOOK}
-      - NEO4J_URI=bolt://sentri-db:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=Delahrg12
-
-volumes:
-  feature_store_data:
