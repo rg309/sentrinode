@@ -883,9 +883,9 @@ def _normalize_neo4j_uri(uri: str | None) -> str | None:
     cleaned = uri.strip()
     if not cleaned:
         return None
-    if cleaned.startswith("neo4j://"):
-        cleaned = "bolt://" + cleaned[len("neo4j://") :]
-    if not cleaned.startswith(("bolt://", "bolt+s://", "bolt+ssc://")):
+    if cleaned.startswith(("neo4j://", "neo4j+s://", "neo4j+ssc://", "bolt://", "bolt+s://", "bolt+ssc://")):
+        return cleaned
+    if "://" not in cleaned:
         cleaned = f"bolt://{cleaned}"
     return cleaned
 
