@@ -6,6 +6,10 @@
 2. Install dependencies (`pip install -r requirements.txt` for Python tooling, `go mod tidy` under `services/go` for Go services).
 3. Use `docker-compose up` to start the stack locally when needed.
 
+### Hosted Console
+
+The portable Streamlit console is also exposed at `https://sentrinode-production.up.railway.app:8501`. Use the same `NEO4J_*` environment variables described below to configure the Railway deployment.
+
 ### Initial Dashboard Login
 
 The Streamlit UI now boots in a "setup" mode. Provide one of the bootstrap keys listed in the `AUTHORIZED_KEYS` environment variable (or `[bootstrap] authorized_keys` inside `.streamlit/secrets.toml`) to unlock the credential wizard. If `SENTRINODE_ADMIN_*` / `SENTRINODE_VIEWER_*` environment variables are defined (see `.env`), the dashboard immediately exposes the username/password login form so you can retain centralized credential management. Otherwise, use the bootstrap wizard once to create credentials; they will be persisted to `.streamlit/secrets.toml`. Keep both `.env` and `.streamlit/secrets.toml` out of source control.
