@@ -730,6 +730,8 @@ def _ensure_bootstrap_unlocked() -> None:
         st.stop()
 
     st.sidebar.subheader("Bootstrap Access")
+    login_instead = False
+    unlocked = False
     with st.sidebar.form("sentri-bootstrap-key"):
         st.write("Enter an authorized bootstrap key to unlock the dashboard.")
         key_value = st.text_input("Setup API Key", type="password")
@@ -737,10 +739,10 @@ def _ensure_bootstrap_unlocked() -> None:
         with buttons[0]:
             unlocked = st.form_submit_button("Unlock Dashboard")
         with buttons[1]:
-            st.form_submit_button("I have credentials", on_click=lambda: st.session_state.update({"skip_bootstrap_prompt": True}))
-    if st.session_state.get("skip_bootstrap_prompt"):
-        st.sidebar.info("Proceeding to credential login without bootstrap unlock.")
-        st.session_state.pop("skip_bootstrap_prompt", None)
+            login_instead = st.form_submit_button("I have credentials")
+    if login_instead:
+        st.sidebar.info("Continue with your dashboard credentials.")
+        st.session_state["bootstrap_verified"] = True
         return
     if unlocked:
         if key_value.strip() in AUTHORIZED_BOOTSTRAP_KEYS:
