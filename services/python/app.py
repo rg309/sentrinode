@@ -877,8 +877,21 @@ nav_items = [
 
 neo4j_secret = get_secret_section("neo4j")
 webhook_secret = get_secret_section("webhooks")
-raw_neo4j_uri = (neo4j_secret.get("uri") or os.getenv("NEO4J_URI") or "").strip()
-NEO4J_URI = raw_neo4j_uri or None
+def _normalize_neo4j_uri(uri: str | None) -> str | None:
+    if not uri:
+        return None
+    cleaned = uri.strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("neo4j://"):
+        cleaned = "bolt://" + cleaned[len("neo4j://") :]
+    if not cleaned.startswith(("bolt://", "bolt+s://", "bolt+ssc://")):
+        cleaned = f"bolt://{cleaned}"
+    return cleaned
+
+
+raw_neo4j_uri = neo4j_secret.get("uri") or os.getenv("NEO4J_URI")
+NEO4J_URI = _normalize_neo4j_uri(raw_neo4j_uri)
 NEO4J_USER = neo4j_secret.get("user") or os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = neo4j_secret.get("password") or os.getenv("NEO4J_PASSWORD")
 ALERT_WEBHOOK_URL = webhook_secret.get("alert_url") or os.getenv("SENTRINODE_ALERT_WEBHOOK")
@@ -980,7 +993,7 @@ else:
 
 st.sidebar.header("SentriNode Database")
 if st.sidebar.button("Test Graph Connection", key="test-neo4j"):
-    test_uri = (NEO4J_URI or "bolt://sentrinode-db:7687").strip()
+    test_uri = _normalize_neo4j_uri(NEO4J_URI) or "bolt://sentrinode-db:7687"
     if check_neo4j_connection(test_uri, NEO4J_USER or "neo4j", NEO4J_PASSWORD or ""):
         st.sidebar.success("Connected to Neo4j.")
 
