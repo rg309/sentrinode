@@ -856,13 +856,14 @@ st.sidebar.text_input(
     key="search",
 )
 tenant_default = st.session_state.get("tenant_field", "sentri-labs")
-tenant_input = st.sidebar.text_input(
+tenant_label = st.sidebar.text_input(
     "Tenant / Org ID",
     value=tenant_default,
-    help="Scope analytics and Neo4j queries to a specific tenant.",
+    help="Tenant scope is centrally managed for demos to avoid accidental cross-tenant access.",
     key="tenant_field",
+    disabled=True,
 )
-tenant_id = tenant_input.strip() or None
+tenant_id = tenant_label.strip() or None
 
 demo_mode = st.sidebar.checkbox(
     "Demo Mode",
