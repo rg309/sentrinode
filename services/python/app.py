@@ -821,9 +821,13 @@ def draw_demo_graph() -> None:
 
 
 def require_authentication() -> str:
+    _ensure_bootstrap_unlocked()
     credentials = _get_active_credentials()
     if not credentials:
-        _run_initial_setup()
+        st.sidebar.error(
+            "Dashboard credentials are not configured. Set SENTRINODE_ADMIN_USER/PWD and SENTRINODE_VIEWER_USER/PWD environment variables (or provide .streamlit/secrets.toml) before continuing."
+        )
+        st.stop()
 
     stored_role = st.session_state.get("role")
 
