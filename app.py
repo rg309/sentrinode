@@ -7,7 +7,6 @@ import os
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
@@ -36,136 +35,140 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
     :root {
-        --bg: #1e293b;
-        --surface: #243049;
-        --surface-alt: #2b374c;
-        --border: #344155;
+        --bg: #0f172a;
+        --panel: #162033;
+        --panel-alt: #19253a;
+        --border: #1f2937;
         --text: #f8fafc;
-        --muted: #cbd5f5;
-        --accent: #2563eb;
+        --muted: #94a3b8;
+        --accent: #38bdf8;
         --alert: #ef4444;
     }
     html, body, [data-testid="stAppViewContainer"], .main, [data-testid="block-container"] {
         background-color: var(--bg) !important;
         color: var(--text) !important;
-        font-family: 'Inter', 'Helvetica', sans-serif !important;
+        font-family: 'Inter', 'Public Sans', sans-serif !important;
     }
     #MainMenu, footer, header[data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="collapsedControl"] {
         display: none !important;
     }
-    .app-shell {
+    .layout-shell {
         padding: 24px 48px 72px 48px;
     }
-    .header-bar {
+    .control-bar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        background: var(--surface);
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 20px 28px;
+        border-radius: 6px;
+        padding: 18px 24px;
         margin-bottom: 28px;
     }
-    .eyebrow {
-        font-size: 0.85rem;
-        letter-spacing: 0.12em;
-        color: var(--muted);
-        text-transform: uppercase;
-        margin-bottom: 4px;
-    }
-    .title {
-        font-size: 1.8rem;
+    .control-bar .brand {
+        font-size: 1.6rem;
         font-weight: 600;
-        color: var(--text);
     }
-    .status-group {
+    .control-bar .meta {
         text-align: right;
-    }
-    .status-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 6px 14px;
-        border-radius: 999px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        border: 1px solid var(--border);
-        color: var(--text);
-    }
-    .status-pill.alert {
-        border-color: var(--alert);
-        color: var(--alert);
-    }
-    .timestamp {
-        font-size: 0.85rem;
         color: var(--muted);
-        margin-top: 6px;
+        font-size: 0.9rem;
     }
-    .card-grid {
+    .metric-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
         margin-bottom: 32px;
     }
-    .stat-card {
-        background: var(--surface);
+    .metric-card {
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 6px;
         padding: 16px 18px;
-        min-height: 120px;
+        min-height: 110px;
     }
-    .card-label {
-        font-size: 0.85rem;
+    .metric-card h4 {
+        font-size: 0.8rem;
         text-transform: uppercase;
+        letter-spacing: 0.09em;
         color: var(--muted);
-        letter-spacing: 0.08em;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
     }
-    .card-value {
+    .metric-card .value {
         font-size: 2rem;
         font-weight: 600;
-        color: var(--text);
     }
-    .card-subtext {
-        margin-top: 6px;
-        font-size: 0.9rem;
+    .metric-card .value.alert {
+        color: var(--alert);
+    }
+    .metric-card .subtext {
+        font-size: 0.85rem;
         color: var(--muted);
+        margin-top: 6px;
     }
-    .panel {
-        background: var(--surface);
+    .panel-frame {
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 18px 22px;
-        margin-bottom: 26px;
+        border-radius: 6px;
+        padding: 18px 20px;
+        margin-bottom: 28px;
     }
-    .panel h3 {
-        font-size: 1rem;
-        font-weight: 600;
+    .panel-title {
+        font-size: 0.9rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--muted);
-        margin-bottom: 16px;
+        margin-bottom: 18px;
     }
-    .alerts-table {
+    .timeline {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+    .timeline-entry {
+        display: flex;
+        gap: 14px;
+        border-left: 2px solid var(--border);
+        padding-left: 12px;
+    }
+    .timeline-entry time {
+        font-size: 0.85rem;
+        color: var(--muted);
+        min-width: 120px;
+    }
+    .timeline-entry p {
+        margin: 0;
+        font-size: 0.95rem;
+    }
+    .dependency-table {
         width: 100%;
         border-collapse: collapse;
         font-size: 0.9rem;
     }
-    .alerts-table th,
-    .alerts-table td {
-        border-bottom: 1px solid rgba(255,255,255,0.06);
+    .dependency-table th,
+    .dependency-table td {
         padding: 10px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
     }
-    .alerts-table th {
-        color: var(--muted);
+    .dependency-table th {
         text-transform: uppercase;
         font-size: 0.75rem;
         letter-spacing: 0.08em;
+        color: var(--muted);
     }
-    .alerts-table td {
-        color: var(--text);
+    .badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
     }
-    .alerts-table tr:last-child td {
-        border-bottom: none;
+    .badge.low {
+        background: rgba(56,189,248,0.12);
+        color: var(--accent);
+    }
+    .badge.critical {
+        background: rgba(239,68,68,0.12);
+        color: var(--alert);
     }
     canvas {
         filter: none !important;
@@ -197,16 +200,16 @@ def _sample_alerts() -> pd.DataFrame:
             {
                 "ts": datetime.utcnow().isoformat(timespec="seconds"),
                 "service": "payments-api",
-                "dependency": "postgres-core",
+                "dependency": "db-cluster-01",
                 "severity": "critical",
-                "reason": "p99 > 450ms",
+                "reason": "High latency",
             },
             {
-                "ts": (datetime.utcnow() - timedelta(minutes=5)).isoformat(timespec="seconds"),
-                "service": "inventory-api",
-                "dependency": "redis-edge",
+                "ts": (datetime.utcnow() - timedelta(minutes=2)).isoformat(timespec="seconds"),
+                "service": "auth-service",
+                "dependency": "redis-latency",
                 "severity": "warning",
-                "reason": "error rate above 2%",
+                "reason": "Error budget burn",
             },
         ]
     )
@@ -214,15 +217,17 @@ def _sample_alerts() -> pd.DataFrame:
 
 def _fallback_topology() -> tuple[list[dict[str, str]], list[dict[str, float]]]:
     nodes = [
-        {"name": "gateway", "health": "HEALTHY"},
-        {"name": "payments", "health": "ANOMALY"},
-        {"name": "inventory", "health": "HEALTHY"},
-        {"name": "edge-cache", "health": "HEALTHY"},
+        {"name": "edge-lb", "health": "HEALTHY"},
+        {"name": "web-tier", "health": "HEALTHY"},
+        {"name": "auth-service", "health": "ANOMALY"},
+        {"name": "payments", "health": "HEALTHY"},
+        {"name": "db-cluster-01", "health": "ANOMALY"},
     ]
     edges = [
-        {"source": "gateway", "target": "payments", "latency": 480.0, "anomaly": True},
-        {"source": "gateway", "target": "inventory", "latency": 180.0, "anomaly": False},
-        {"source": "payments", "target": "edge-cache", "latency": 320.0, "anomaly": False},
+        {"source": "edge-lb", "target": "web-tier", "latency": 120.0, "anomaly": False},
+        {"source": "web-tier", "target": "auth-service", "latency": 220.0, "anomaly": True},
+        {"source": "web-tier", "target": "payments", "latency": 180.0, "anomaly": False},
+        {"source": "auth-service", "target": "db-cluster-01", "latency": 460.0, "anomaly": True},
     ]
     return nodes, edges
 
@@ -273,174 +278,161 @@ def _load_topology() -> tuple[bool, list[dict[str, str]], list[dict[str, float]]
             driver.close()
 
 
+def _causal_entropy(nodes: list[dict[str, str]], edges: list[dict[str, float]]) -> float:
+    if not nodes or not edges:
+        return 0.0
+    anomaly_edges = sum(1 for edge in edges if edge.get("anomaly"))
+    weighted_latency = sum(edge.get("latency", 0.0) for edge in edges)
+    entropy = np.log1p(weighted_latency / max(1, len(nodes)) + anomaly_edges * 50)
+    return round(min(entropy * 3, 99.9), 1)
+
+
+def _timeline(alerts: pd.DataFrame) -> list[dict[str, datetime]]:
+    events: list[dict[str, datetime]] = []
+    for _, row in alerts.iterrows():
+        ts_raw = row["ts"]
+        try:
+            ts_obj = datetime.fromisoformat(ts_raw.replace("Z", ""))
+        except ValueError:
+            ts_obj = datetime.utcnow()
+        events.append({"time": ts_obj, "text": f"{row['reason']} detected in {row['dependency'].upper()}"})
+        events.append({"time": ts_obj, "text": f"SentriNode identified '{row['service']}' as causal source."})
+    return sorted(events, key=lambda item: item["time"], reverse=True)
+
+
+def _dependency_matrix(nodes: list[dict[str, str]], edges: list[dict[str, float]]) -> pd.DataFrame:
+    dep_count: dict[str, int] = {}
+    for edge in edges:
+        dep_count[edge["source"]] = dep_count.get(edge["source"], 0) + 1
+    rows = []
+    for node in nodes:
+        name = node["name"]
+        deps = dep_count.get(name, 0)
+        is_critical = node.get("health") == "ANOMALY"
+        risk = "CRITICAL" if is_critical else ("MEDIUM" if deps >= 3 else "LOW")
+        status = "Latent" if is_critical else "Healthy"
+        rows.append({
+            "Service": name,
+            "Dependencies": deps,
+            "Risk Level": risk,
+            "Status": status,
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    order = {"CRITICAL": 0, "MEDIUM": 1, "LOW": 2}
+    df["risk_order"] = df["Risk Level"].map(order).fillna(3)
+    return df.sort_values(by=["risk_order", "Dependencies"], ascending=[True, False]).drop(columns=["risk_order"])
+
+
 metrics_df = _stream_metrics()
 alerts_df = _sample_alerts()
 connected, nodes_data, edges_data = _load_topology()
 
-nodes_online = len(nodes_data)
-anomaly_nodes = sum(1 for node in nodes_data if node.get("health") == "ANOMALY")
-alerts_open = len(alerts_df)
-mean_latency = metrics_df["p99_latency"].tail(12).mean()
-latest_error = metrics_df["error_rate"].iloc[-1]
+active_nodes = len(nodes_data)
+latest_latency = metrics_df["p99_latency"].iloc[-1]
+causal_entropy = _causal_entropy(nodes_data, edges_data)
+anomaly_count = sum(1 for node in nodes_data if node.get("health") == "ANOMALY")
 
-system_health = "Stable" if connected and anomaly_nodes == 0 and alerts_open == 0 else "Attention Required"
-status_bad = system_health != "Stable"
+timeline_events = _timeline(alerts_df)
+dependency_df = _dependency_matrix(nodes_data, edges_data)
+
 current_timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-st.markdown('<div class="app-shell">', unsafe_allow_html=True)
+st.markdown('<div class="layout-shell">', unsafe_allow_html=True)
 st.markdown(
     f"""
-    <div class="header-bar">
+    <div class="control-bar">
         <div>
-            <div class="eyebrow">SentriNode</div>
-            <div class="title">Operations Control</div>
+            <div class="brand">SentriNode // Enterprise Control</div>
+            <div style="color: var(--muted); font-size:0.95rem;">Observability & causal intelligence</div>
         </div>
-        <div class="status-group">
-            <div class="status-pill{' alert' if status_bad else ''}">
-                {'Degraded Link' if status_bad else 'Operational'}
-            </div>
-            <div class="timestamp">Updated {current_timestamp}</div>
+        <div class="meta">
+            {'Connected' if connected else 'Fallback Topology'}<br/>
+            Updated {current_timestamp}
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-cards = [
-    {
-        "label": "Nodes Online",
-        "value": str(nodes_online),
-        "subtext": "Connected to Neo4j" if connected else "Fallback topology in use",
-    },
-    {
-        "label": "System Health",
-        "value": system_health,
-        "subtext": f"{anomaly_nodes} anomaly nodes",
-    },
-    {
-        "label": "Active Alerts",
-        "value": str(alerts_open),
-        "subtext": "Monitoring stack",
-    },
-    {
-        "label": "Avg p99 (min 12)",
-        "value": f"{mean_latency:.0f} ms",
-        "subtext": f"Current error {latest_error:.2f}%",
-    },
+metric_cards = [
+    {"label": "Active Nodes", "value": str(active_nodes), "sub": "Telemetry sources"},
+    {"label": "System Latency (P99)", "value": f"{latest_latency:.0f} ms", "sub": "Global tail latency"},
+    {"label": "Causal Entropy", "value": f"{causal_entropy:.1f}", "sub": "Instability index"},
+    {"label": "Anomaly Count", "value": str(anomaly_count), "sub": "Root causes", "alert": anomaly_count > 0},
 ]
 
-cards_html = "<div class='card-grid'>" + "".join(
+cards_html = "<div class='metric-grid'>" + "".join(
     f"""
-    <div class='stat-card'>
-        <div class='card-label'>{card['label']}</div>
-        <div class='card-value'>{card['value']}</div>
-        <div class='card-subtext'>{card['subtext']}</div>
+    <div class='metric-card'>
+        <h4>{card['label']}</h4>
+        <div class='value{' alert' if card.get('alert') else ''}'>{card['value']}</div>
+        <div class='subtext'>{card['sub']}</div>
     </div>
     """
-    for card in cards
+    for card in metric_cards
 ) + "</div>"
 
 st.markdown(cards_html, unsafe_allow_html=True)
 
-
-def _style_figure(fig) -> None:
-    fig.update_layout(
-        paper_bgcolor="#1e293b",
-        plot_bgcolor="#1e293b",
-        font=dict(family="Inter", color="#f8fafc"),
-        margin=dict(l=0, r=0, t=30, b=0),
-        title_font=dict(size=16, color="#f8fafc"),
-        xaxis=dict(color="#cbd5f5", gridcolor="rgba(255,255,255,0.05)"),
-        yaxis=dict(color="#cbd5f5", gridcolor="rgba(255,255,255,0.05)"),
-    )
-
-
-latency_fig = px.line(
-    metrics_df,
-    x="timestamp",
-    y="p99_latency",
-    title="Latency (p99) – Last 60 minutes",
-    labels={"timestamp": "UTC", "p99_latency": "ms"},
-)
-latency_fig.update_traces(line_color="#38bdf8")
-_style_figure(latency_fig)
-
-error_fig = px.area(
-    metrics_df,
-    x="timestamp",
-    y="error_rate",
-    title="Error Rate",
-    labels={"timestamp": "UTC", "error_rate": "%"},
-)
-error_fig.update_traces(line_color="#f97316", fillcolor="rgba(249,115,22,0.25)")
-_style_figure(error_fig)
-
-chart_cols = st.columns(2)
-with chart_cols[0]:
-    st.markdown('<div class="panel"><h3>latency telemetry</h3>', unsafe_allow_html=True)
-    st.plotly_chart(latency_fig, use_container_width=True, config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-with chart_cols[1]:
-    st.markdown('<div class="panel"><h3>error performance</h3>', unsafe_allow_html=True)
-    st.plotly_chart(error_fig, use_container_width=True, config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-
-alerts_html = alerts_df.to_html(index=False, classes="alerts-table", border=0)
-st.markdown(
-    '<div class="panel"><h3>alerts & escalations</h3>' + alerts_html + '</div>',
-    unsafe_allow_html=True,
-)
-
-st.markdown('<div class="panel">', unsafe_allow_html=True)
-st.markdown('<h3>service dependency graph</h3>', unsafe_allow_html=True)
+# --- Graph ---
+st.markdown('<div class="panel-frame">', unsafe_allow_html=True)
+st.markdown('<div class="panel-title">causal topology map</div>', unsafe_allow_html=True)
 
 if not all([Config, Node, Edge, agraph]):
     st.warning("Install streamlit-agraph to render the service graph.")
     st.dataframe(pd.DataFrame(nodes_data))
 else:
-    node_index = {node["name"]: node for node in nodes_data}
+    node_index = {node["name"]: node.copy() for node in nodes_data}
+    incoming_anomaly: dict[str, int] = {node["name"]: 0 for node in nodes_data}
     for edge in edges_data:
         if edge.get("anomaly"):
+            incoming_anomaly[edge["target"]] = incoming_anomaly.get(edge["target"], 0) + 1
             node_index.setdefault(edge["source"], {"name": edge["source"], "health": "ANOMALY"})
             node_index.setdefault(edge["target"], {"name": edge["target"], "health": "ANOMALY"})
             node_index[edge["source"]]["health"] = "ANOMALY"
             node_index[edge["target"]]["health"] = "ANOMALY"
 
+    root_candidates = [name for name, info in node_index.items() if info.get("health") == "ANOMALY"]
+    root_causes = [name for name in root_candidates if incoming_anomaly.get(name, 0) == 0]
+    if not root_causes:
+        root_causes = root_candidates
+
     node_objs = []
-    for node in node_index.values():
-        is_anomaly = node.get("health") == "ANOMALY"
+    for name, info in node_index.items():
+        is_root = name in root_causes
         color_block = {
-            "border": "#ef4444" if is_anomaly else "#cbd5f5",
-            "background": "#94a3b8",
-            "highlight": {
-                "border": "#ef4444" if is_anomaly else "#38bdf8",
-                "background": "#cbd5f5",
-            },
+            "background": "#1f2937" if not is_root else "#ef4444",
+            "border": "#48607a" if not is_root else "#ef4444",
+            "highlight": {"background": "#334155", "border": "#38bdf8"},
         }
         node_objs.append(
             Node(
-                id=node["name"],
-                label=node["name"],
-                size=26,
+                id=name,
+                label=name,
+                size=30,
                 color=color_block,
-                borderWidth=4 if is_anomaly else 2,
-                font={"color": "#0f172a", "size": 16},
+                borderWidth=4 if is_root else 2,
+                font={"color": "#f8fafc", "size": 16},
+                shape="dot",
             )
         )
 
     edge_objs = []
     for edge in edges_data:
-        source_bad = node_index.get(edge["source"], {}).get("health") == "ANOMALY"
-        target_bad = node_index.get(edge["target"], {}).get("health") == "ANOMALY"
-        anomaly_link = source_bad or target_bad
+        latency = edge.get("latency", 0.0)
+        width = max(1, min(8, latency / 80))
+        color = "#ef4444" if edge.get("anomaly") else "#38bdf8"
         edge_objs.append(
             Edge(
                 source=edge["source"],
                 target=edge["target"],
-                color="#ef4444" if anomaly_link else "#475569",
-                width=2,
-                smooth={"enabled": True, "type": "continuous"},
-                title=f"{edge['source']} ▶ {edge['target']} · {edge['latency']:.0f} ms",
+                color=color,
+                width=width,
+                smooth={"enabled": False},
+                arrows="to",
+                title=f"{edge['source']} -> {edge['target']} · {latency:.0f} ms",
             )
         )
 
@@ -448,12 +440,55 @@ else:
         width=1600,
         height=600,
         directed=True,
-        physics=True,
+        physics=False,
+        hierarchical=True,
+        hierarchicalSpacing=180,
+        hierarchicalDirection="LR",
         nodeHighlightBehavior=True,
-        highlightColor="#f8fafc",
-        background="#1e293b",
+        highlightColor="#38bdf8",
+        collapsible=False,
     )
     agraph(node_objs, edge_objs, graph_config)
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+bottom_cols = st.columns(2)
+with bottom_cols[0]:
+    st.markdown('<div class="panel-frame"><div class="panel-title">root cause timeline</div>', unsafe_allow_html=True)
+    if timeline_events:
+        entries_html = "<div class='timeline'>" + "".join(
+            f"""
+            <div class='timeline-entry'>
+                <time>{event['time'].strftime('%H:%M:%S')}</time>
+                <p>{event['text']}</p>
+            </div>
+            """
+            for event in timeline_events
+        ) + "</div>"
+        st.markdown(entries_html, unsafe_allow_html=True)
+    else:
+        st.write("No recent events.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with bottom_cols[1]:
+    st.markdown('<div class="panel-frame"><div class="panel-title">dependency health</div>', unsafe_allow_html=True)
+    if dependency_df.empty:
+        st.write("No dependency data available.")
+    else:
+        table_html = "<table class='dependency-table'><thead><tr>" + "".join(
+            f"<th>{col}</th>" for col in dependency_df.columns
+        ) + "</tr></thead><tbody>"
+        for _, row in dependency_df.iterrows():
+            risk_class = "critical" if row["Risk Level"] == "CRITICAL" else "low"
+            table_html += "<tr>"
+            table_html += f"<td>{row['Service']}</td>"
+            table_html += f"<td>{row['Dependencies']}</td>"
+            table_html += f"<td><span class='badge {risk_class}'>{row['Risk Level']}</span></td>"
+            status_icon = "⚠️" if row["Status"].lower() != "healthy" else "✅"
+            table_html += f"<td>{status_icon} {row['Status']}</td>"
+            table_html += "</tr>"
+        table_html += "</tbody></table>"
+        st.markdown(table_html, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
 st.markdown('</div>', unsafe_allow_html=True)
