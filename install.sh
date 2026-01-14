@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: Docker is not installed or not on PATH." >&2
@@ -8,6 +8,12 @@ fi
 
 if ! command -v docker compose >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   echo "Error: Docker Compose is not installed." >&2
+  exit 1
+fi
+
+API_KEY="${1:-}"
+if [ -z "$API_KEY" ]; then
+  echo "Usage: bash install.sh <NEO4J_API_KEY>" >&2
   exit 1
 fi
 
@@ -83,11 +89,10 @@ services:
 EOF
 
 read -r -p "Enter Railway Neo4j URI: " INPUT_URI
-read -r -s -p "Enter Railway Neo4j password: " INPUT_PASSWORD
-echo
-
-export NEO4J_URI="$INPUT_URI"
-export NEO4J_PASSWORD="$INPUT_PASSWORD"
+NEO4J_URI="$INPUT_URI"
+NEO4J_PASSWORD="$API_KEY"
+export NEO4J_URI
+export NEO4J_PASSWORD
 
 if command -v docker compose >/dev/null 2>&1; then
   docker compose up --build -d
