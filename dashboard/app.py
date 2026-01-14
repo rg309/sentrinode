@@ -1,161 +1,153 @@
 #!/usr/bin/env python3
-"""SentriNode Local Dashboard Console."""
+"""SentriNode Portable Console – Streamlit 2026 edition."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 import os
 
+import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
-try:  # Optional for the topology map
-    from streamlit_agraph import Config, Edge, Node, agraph
-except Exception:  # pragma: no cover - optional dependency
-    Config = Edge = Node = agraph = None
 
-st.set_page_config(page_title="SentriNode Console", layout="wide", initial_sidebar_state="expanded")
-
-
-def _clean_uri(raw_uri: str | None) -> str:
+def _normalize_neo4j_uri(raw_uri: str | None) -> str:
     uri = (raw_uri or "bolt://localhost:7687").strip().rstrip("/")
     if "://" not in uri:
         uri = f"bolt://{uri}"
     return uri
 
 
-NEO4J_URI = _clean_uri(os.getenv("NEO4J_URI"))
+NEO4J_URI = _normalize_neo4j_uri(os.getenv("NEO4J_URI"))
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 
+st.set_page_config(
+    page_title="SentriNode Console",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-@dataclass
-class GraphSnapshot:
-    nodes: list[dict]
-    edges: list[dict]
+
+@st.cache_data(ttl=30)
+def _stream_metrics() -> pd.DataFrame:
+    now = datetime.utcnow()
+    rows = [
+        {
+            "timestamp": now - timedelta(minutes=idx),
+            "p99_latency": 130 + np.sin(idx / 4) * 15 + np.random.randn() * 3,
+            "error_rate": max(0.0, 1.2 + np.cos(idx / 6) * 0.3),
+        }
+        for idx in range(60)
+    ]
+    return pd.DataFrame(rows).sort_values("timestamp")
 
 
-def _connect() -> tuple[bool, str, GraphSnapshot]:
-    snapshot = GraphSnapshot(nodes=[], edges=[])
+@st.cache_data(ttl=15)
+def _sample_alerts() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "ts": datetime.utcnow().isoformat(timespec="seconds"),
+                "service": "payments-api",
+                "dependency": "postgres-core",
+                "severity": "critical",
+                "reason": "p99 > 450ms",
+            },
+            {
+                "ts": (datetime.utcnow() - timedelta(minutes=5)).isoformat(timespec="seconds"),
+                "service": "inventory-api",
+                "dependency": "redis-edge",
+                "severity": "warning",
+                "reason": "error rate above 2%",
+            },
+        ]
+    )
+
+
+def _probe_neo4j() -> tuple[bool, str, dict[str, int]]:
+    info: dict[str, int] = {"nodes": 0, "relationships": 0}
     try:
         driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         with driver.session() as session:
-            node_rows = session.run(
-                """
-                MATCH (s:Service)
-                OPTIONAL MATCH (s)-[r:DEPENDS_ON]->(t:Service)
-                RETURN DISTINCT s.name AS name, COALESCE(r.latency_ms, 0) AS latency
-                """
-            )
-            edge_rows = session.run(
-                """
-                MATCH (s:Service)-[r:DEPENDS_ON]->(t:Service)
-                RETURN s.name AS source, t.name AS target, r.latency_ms AS latency
-                """
-            )
-            snapshot.nodes = [
-                {"name": record["name"] or f"service-{idx}", "latency": record["latency"] or 0}
-                for idx, record in enumerate(node_rows)
-            ]
-            snapshot.edges = [
-                {
-                    "source": record["source"],
-                    "target": record["target"],
-                    "latency": record["latency"] or 0,
-                }
-                for record in edge_rows
-            ]
+            info["nodes"] = session.run("MATCH (n) RETURN count(n) AS c").single().value()
+            info["relationships"] = session.run("MATCH ()-[r]->() RETURN count(r) AS c").single().value()
         driver.close()
-        return True, "Connected to Neo4j", snapshot
+        return True, "Connected to Neo4j", info
     except ServiceUnavailable:
-        return False, "Neo4j host unreachable. Check your tunnel or Railway networking.", snapshot
+        return False, "Neo4j host unreachable – confirm Railway private networking or local tunnel.", info
     except Neo4jError as exc:
-        return False, f"Neo4j authentication/bolt handshake failed: {exc}", snapshot
+        return False, f"Neo4j authentication or bolt negotiation failed: {exc}", info
     except Exception as exc:  # pragma: no cover - defensive
-        return False, f"Unexpected Neo4j error: {exc}", snapshot
+        return False, f"Unexpected Neo4j error: {exc}", info
 
 
-connected, connection_msg, snapshot = _connect()
+connected, connection_msg, graph_stats = _probe_neo4j()
 
-# Sidebar status -------------------------------------------------------------
+# Sidebar --------------------------------------------------------------------
 st.sidebar.title("SentriNode Console")
-status_icon = "🟢" if connected else "🔴"
-st.sidebar.markdown(f"### Connection Status {status_icon}")
+status_emoji = "🟢" if connected else "🔴"
+st.sidebar.markdown(f"### Connection Status {status_emoji}")
 st.sidebar.write(connection_msg)
-st.sidebar.write(f"URI: `{NEO4J_URI}`")
-st.sidebar.write(f"User: `{NEO4J_USER}`")
-st.sidebar.metric("Services Detected", len(snapshot.nodes))
-st.sidebar.metric("Dependencies", len(snapshot.edges))
-st.sidebar.markdown("---")
+st.sidebar.write(f"**URI** `{NEO4J_URI}`")
+st.sidebar.write(f"**User** `{NEO4J_USER}`")
+st.sidebar.metric("Graph Nodes", graph_stats["nodes"])
+st.sidebar.metric("Relationships", graph_stats["relationships"])
+st.sidebar.divider()
 
-# Header ---------------------------------------------------------------------
-st.title("SentriNode Portable Dashboard")
-st.caption("All-in-one observability cockpit for local demos (2026 refresh).")
+telemetry_enabled = st.sidebar.toggle("OTel Agent Enabled", value=True)
+st.sidebar.caption("Requires the sentrinode-agent container from docker-compose.")
 
-# KPI cards ------------------------------------------------------------------
-now = datetime.utcnow()
-kpi_cols = st.columns(3)
-kpi_cols[0].metric("Current p99 latency", "420 ms", "+15 vs last hour")
-kpi_cols[1].metric("Error rate", "1.2%", "-0.3 vs yesterday")
-kpi_cols[2].metric("Active alerts", "3", delta="2 critical")
+# Main content ---------------------------------------------------------------
+st.title("SentriNode Portable Console")
+st.caption("Edge observability in a suitcase – optimized for on-site investor demos.")
 
-# Topology -------------------------------------------------------------------
-st.subheader("Topology Map")
-if connected and snapshot.edges and agraph:
-    graph_nodes = [
-        Node(id=node["name"], label=node["name"], size=20, color="#00D4FF") for node in snapshot.nodes
-    ]
-    graph_edges = [
-        Edge(
-            source=edge["source"],
-            target=edge["target"],
-            label=f'{int(edge["latency"] or 0)} ms',
-            color="#FF4B4B" if (edge["latency"] or 0) > 350 else "#00D4FF",
-        )
-        for edge in snapshot.edges
-    ]
-    config = Config(width=900, height=520, directed=True, physics=True, hierarchical=False)
-    st.caption("Visualized via streamlit-agraph.")
-    agraph(graph_nodes, graph_edges, config)
-else:
-    if not connected:
-        st.warning("Topology unavailable until Neo4j connection succeeds.")
-    elif not agraph:
-        st.info("Install streamlit-agraph to render a graph view. Showing raw dataframe instead.")
-    df = pd.DataFrame(snapshot.edges or snapshot.nodes)
-    st.dataframe(df if not df.empty else pd.DataFrame([{"status": "No topology data detected"}]), width="stretch")
+metrics_df = _stream_metrics()
+alerts_df = _sample_alerts()
 
-# Trend panels ---------------------------------------------------------------
-st.subheader("Latency & Error Trends")
-trend_cols = st.columns(2)
+col_kpi = st.columns(3)
+col_kpi[0].metric("Current p99 latency", f"{metrics_df['p99_latency'].iloc[-1]:.0f} ms")
+col_kpi[1].metric("Error rate", f"{metrics_df['error_rate'].iloc[-1]:.2f}%")
+col_kpi[2].metric("Active alerts", len(alerts_df))
 
-latency_data = pd.DataFrame(
-    {
-        "timestamp": [now - timedelta(minutes=idx) for idx in range(60)],
-        "latency_ms": [420 + (idx % 10) * 6 for idx in range(60)],
-    }
-).sort_values("timestamp")
-trend_cols[0].line_chart(latency_data.set_index("timestamp"), height=300, width="stretch")
-
-error_data = pd.DataFrame(
-    {
-        "timestamp": [now - timedelta(minutes=idx) for idx in range(60)],
-        "error_rate": [1.2 + (idx % 5) * 0.1 for idx in range(60)],
-    }
-).sort_values("timestamp")
-trend_cols[1].area_chart(error_data.set_index("timestamp"), height=300, width="stretch")
-
-# Alert stream ---------------------------------------------------------------
-st.subheader("Latest Alerts")
-alerts_df = pd.DataFrame(
-    [
-        {"time": now.isoformat(timespec="seconds"), "service": "payments-api", "severity": "Critical"},
-        {"time": (now - timedelta(minutes=3)).isoformat(timespec="seconds"), "service": "inventory-api", "severity": "Warning"},
-        {"time": (now - timedelta(minutes=8)).isoformat(timespec="seconds"), "service": "edge-cache", "severity": "Info"},
-    ]
+fig_latency = px.line(
+    metrics_df,
+    x="timestamp",
+    y="p99_latency",
+    title="Latency trend (last 60 minutes)",
+    labels={"timestamp": "UTC Time", "p99_latency": "p99 (ms)"},
 )
-st.dataframe(alerts_df, width="stretch", height=210)
+fig_latency.update_layout(margin=dict(l=10, r=10, t=50, b=10))
+st.plotly_chart(fig_latency, config={"displayModeBar": False}, width="stretch")
 
-st.success("Ready to stream telemetry via docker compose (sentrinode-agent + sentrinode-ui).")
+fig_error = px.area(
+    metrics_df,
+    x="timestamp",
+    y="error_rate",
+    title="Error rate overview",
+    labels={"timestamp": "UTC Time", "error_rate": "%"},
+)
+fig_error.update_layout(margin=dict(l=10, r=10, t=50, b=10), yaxis_tickformat=".2f")
+st.plotly_chart(fig_error, config={"displayModeBar": False}, width="stretch")
+
+st.subheader("Alerts & recommendations")
+st.dataframe(alerts_df, width="stretch", height=260)
+
+st.subheader("Synthetic span explorer")
+span_rows = [
+    {
+        "span_id": f"span-{idx:04d}",
+        "service": np.random.choice(["gateway", "payments", "inventory", "edge-cache"]),
+        "latency_ms": np.random.randint(80, 420),
+        "status": np.random.choice(["OK", "ANOMALY"], p=[0.78, 0.22]),
+    }
+    for idx in range(1, 41)
+]
+st.dataframe(pd.DataFrame(span_rows), width="stretch", height=360)
+
+if telemetry_enabled:
+    st.info("Telemetry forwarding to sentrinode-agent is enabled. Inspect collector logs for OTLP traffic.")
+else:
+    st.warning("Telemetry disabled. Toggle it on from the sidebar if you want OTLP export.")

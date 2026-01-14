@@ -11,7 +11,9 @@ COPY app.py /app/app.py
 RUN pip install --no-cache-dir \
         streamlit==1.39.0 \
         neo4j==5.20.0 \
-        pandas==2.2.3
+        pandas==2.2.3 \
+        numpy==1.26.4 \
+        plotly==5.23.0
 
 EXPOSE 8501
 
