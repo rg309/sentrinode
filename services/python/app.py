@@ -179,7 +179,7 @@ render_metrics()
 def render_graph():
     if not Config or not Node or not Edge or not agraph:
         st.warning("Install streamlit-agraph to render the cyber graph.")
-        st.dataframe(pd.DataFrame(edges_data or nodes_data), width="stretch")
+        st.dataframe(pd.DataFrame(edges_data or nodes_data))
         return
 
     node_map = {node["name"]: node for node in nodes_data}
