@@ -72,7 +72,7 @@ def _fetch_topology() -> tuple[bool, list[dict[str, object]]]:
                 """
             )
             return True, [dict(record) for record in records]
-    except (ServiceUnavailable, Neo4jError):
+    except (ServiceUnavailable, Neo4jError, ValueError):
         fallback = [
             {"source": "edge-lb", "target": "api-gateway", "rel": "ROUTES", "latency": 80.0},
             {"source": "api-gateway", "target": "auth-service", "rel": "CALLS", "latency": 210.0},
