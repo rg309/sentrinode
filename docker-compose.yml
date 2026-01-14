@@ -15,8 +15,8 @@ services:
 
   sentrinode-ui:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dashboard/Dockerfile
     container_name: sentrinode-ui
     depends_on:
       - sentrinode-agent

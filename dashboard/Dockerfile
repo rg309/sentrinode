@@ -6,15 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY app.py /app/app.py
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir \
-        streamlit==1.39.0 \
-        neo4j==5.20.0 \
-        pandas==2.2.3 \
-        numpy==1.26.4 \
-        plotly==5.23.0
+COPY . /app
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
