@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""SentriNode Security Operations Center dashboard."""
+"""SentriNode Cyberpunk SOC dashboard."""
 from __future__ import annotations
 
 from datetime import datetime
 import os
-import random
 
 import pandas as pd
 import streamlit as st
@@ -13,7 +12,7 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 try:
     from streamlit_agraph import Config, Edge, Node, agraph
-except Exception:  # pragma: no cover - optional dependency
+except Exception:  # pragma: no cover
     Config = Edge = Node = agraph = None
 
 
@@ -28,77 +27,79 @@ NEO4J_URI = _normalize_uri(os.getenv("NEO4J_URI"))
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword")
 
-st.set_page_config(
-    page_title="SentriNode SOC",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="SentriNode SOC", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;600&display=swap');
-    body, html, [class*="css"] {
-        background-color: #010409 !important;
-        color: #d5ffe1 !important;
-        font-family: 'Roboto Mono', 'Courier New', monospace !important;
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+    html, body, [class*="css"] {
+        background-color: #000000 !important;
+        color: #bbffc8 !important;
+        font-family: 'JetBrains Mono', 'Roboto Mono', monospace !important;
+        letter-spacing: 0.5px;
     }
-    header, footer, #MainMenu, [data-testid="stSidebar"] {
+    #MainMenu, header, footer, [data-testid="stSidebar"] {
         display: none !important;
     }
     .soc-shell {
-        padding: 6px 24px 40px 24px;
+        padding: 12px 32px 60px 32px;
     }
-    .soc-banner {
-        display: flex;
+    .cyber-banner {
+        display:flex;
         justify-content: space-between;
-        align-items: center;
+        align-items:center;
         padding: 18px 28px;
-        margin-bottom: 18px;
-        border-radius: 16px;
-        border: 1px solid rgba(0, 255, 163, 0.35);
-        background: linear-gradient(120deg, rgba(0,255,163,0.07), rgba(3,25,28,0.95));
-        box-shadow: 0 0 25px rgba(0,255,163,0.12);
+        border-radius: 18px;
+        border: 1px solid rgba(57, 255, 20, 0.4);
+        background: linear-gradient(90deg, rgba(57, 255, 20, 0.1), rgba(0,0,0,0.85), rgba(255,49,49,0.08));
+        box-shadow: 0 0 35px rgba(57, 255, 20, 0.25);
     }
-    .soc-title {
-        font-size: 2.4rem;
-        letter-spacing: 3px;
+    .cyber-title {
+        font-size: 2.2rem;
         text-transform: uppercase;
-        color: #85ffb0;
+        color: #39FF14;
+        text-shadow: 0 0 8px rgba(57,255,20,0.9);
     }
-    .soc-chip {
-        padding: 4px 12px;
+    .glow-chip {
+        padding: 6px 16px;
         border-radius: 999px;
         font-size: 0.85rem;
-        margin-right: 8px;
-        border: 1px solid currentColor;
+        border: 1px solid rgba(255,255,255,0.2);
+        margin-left: 10px;
+        box-shadow: 0 0 12px rgba(57,255,20,0.35);
     }
-    .soc-panel {
-        background: rgba(2, 20, 24, 0.85);
-        border: 1px solid rgba(0, 255, 163, 0.18);
+    .glow {
+        text-shadow: 0 0 14px rgba(57,255,20,0.8);
+    }
+    .panel {
+        background: rgba(0,0,0,0.75);
+        border: 1px solid rgba(57,255,20,0.18);
         border-radius: 14px;
-        padding: 18px 20px;
-        box-shadow: 0 0 20px rgba(0, 255, 163, 0.05);
-        margin-bottom: 18px;
+        padding: 20px 24px;
+        box-shadow: 0 0 25px rgba(57,255,20,0.15);
+        margin-bottom: 20px;
     }
-    .soc-panel h3 {
-        color: #76ff96;
-        text-transform: uppercase;
-        letter-spacing: 2px;
+    .metric-glow {
+        font-size: 2.4rem;
+        color: #39FF14;
+        text-shadow: 0 0 12px rgba(57,255,20,0.8);
+    }
+    .metric-red {
+        color: #FF3131;
+        text-shadow: 0 0 16px rgba(255,49,49,0.9);
     }
     canvas {
-        filter: drop-shadow(0 0 6px rgba(0,255,163,0.3));
+        filter: drop-shadow(0 0 8px rgba(57,255,20,0.4));
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
-@st.cache_data(ttl=20, show_spinner=False)
-def pull_topology() -> tuple[bool, list[dict], list[dict]]:
-    nodes: list[dict] = []
-    edges: list[dict] = []
+@st.cache_data(ttl=15, show_spinner=False)
+def pull_topology():
+    nodes, edges = [], []
     try:
         driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         with driver.session() as session:
@@ -107,22 +108,22 @@ def pull_topology() -> tuple[bool, list[dict], list[dict]]:
                 """
                 MATCH (s:Service)-[r:DEPENDS_ON]->(t:Service)
                 RETURN s.name AS source, t.name AS target,
-                    coalesce(r.latency_ms, rand()*400) AS latency,
-                    coalesce(r.anomaly, r.latency_ms > 380) AS anomaly
+                       coalesce(r.latency_ms, rand()*400) AS latency,
+                       coalesce(r.anomaly, r.latency_ms > 380) AS anomaly
                 """
             )
             nodes = [
-                {"name": record["name"], "health": (record["health"] or "HEALTHY").upper()}
-                for record in node_records
+                {"name": r["name"], "health": (r["health"] or "HEALTHY").upper()}
+                for r in node_records
             ]
             edges = [
                 {
-                    "source": record["source"],
-                    "target": record["target"],
-                    "latency": float(record["latency"] or 0),
-                    "anomaly": bool(record["anomaly"]),
+                    "source": r["source"],
+                    "target": r["target"],
+                    "latency": float(r["latency"] or 0),
+                    "anomaly": bool(r["anomaly"]),
                 }
-                for record in edge_records
+                for r in edge_records
             ]
         driver.close()
         return True, nodes, edges
@@ -142,70 +143,45 @@ def pull_topology() -> tuple[bool, list[dict], list[dict]]:
 
 
 connected, nodes_data, edges_data = pull_topology()
-status_color = "#90ffb8" if connected else "#ff4d6a"
-
+status_chip = "glow-chip glow" if connected else "glow-chip metric-red"
 st.markdown('<div class="soc-shell">', unsafe_allow_html=True)
 st.markdown(
     f"""
-    <div class="soc-banner">
-        <div>
-            <div class="soc-title">SentriNode SOC</div>
-            <div style="opacity:0.7">neo4j target · {NEO4J_URI}</div>
-        </div>
-        <div>
-            <span class="soc-chip" style="color:{status_color}">
-                {'🟢 Secure Link' if connected else '🔴 Offline Mode'}
-            </span>
-            <span class="soc-chip" style="color:#7df3ff">
-                {datetime.utcnow().strftime('%H:%M:%S UTC')}
-            </span>
+    <div class="cyber-banner">
+        <div class="cyber-title">SENTRINODE // CAUSAL_INTELLIGENCE</div>
+        <div style="display:flex;align-items:center;color:#39FF14;">
+            <div class="{status_chip}">
+                {'SYSTEM ACTIVE' if connected else 'LINK FAILURE'}
+            </div>
+            <div class="glow-chip" style="color:#7DF3FF">
+                {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+            </div>
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-def render_kpis() -> None:
-    cols = st.columns(3, gap="large")
-    cols[0].markdown(
-        f"""
-        <div class="soc-panel">
-            <h3>P99 LATENCY</h3>
-            <div style="font-size:2rem;color:#9CFF6E">{random.randint(280, 520)} ms</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    cols[1].markdown(
-        f"""
-        <div class="soc-panel">
-            <h3>ACTIVE ALERTS</h3>
-            <div style="font-size:2rem;color:#FF5C8A">{random.randint(3, 7)}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    cols[2].markdown(
-        f"""
-        <div class="soc-panel">
-            <h3>GRAPH HEALTH</h3>
-            <div style="font-size:2rem;color:#7df3ff">{len(nodes_data)} nodes</div>
-        </div>
-        """,
+
+def render_metrics():
+    c1, c2, c3 = st.columns(3)
+    c1.markdown('<div class="panel"><div class="glow">P99 LATENCY</div><div class="metric-glow">412 ms</div></div>', unsafe_allow_html=True)
+    c2.markdown('<div class="panel"><div class="glow">ACTIVE ANOMALIES</div><div class="metric-glow metric-red">5</div></div>', unsafe_allow_html=True)
+    c3.markdown(
+        f'<div class="panel"><div class="glow">GRAPH NODES</div><div class="metric-glow">{len(nodes_data)}</div></div>',
         unsafe_allow_html=True,
     )
 
 
-render_kpis()
+render_metrics()
 
 
-def render_graph() -> None:
+def render_graph():
     if not Config or not Node or not Edge or not agraph:
-        st.warning("Install streamlit-agraph to view the SOC topology. Displaying raw table.")
-        st.dataframe(pd.DataFrame(edges_data or nodes_data), width="stretch", height=400)
+        st.warning("Install streamlit-agraph to render the cyber graph.")
+        st.dataframe(pd.DataFrame(edges_data or nodes_data), width="stretch")
         return
 
-    pulse = int(datetime.utcnow().timestamp()) % 2
     node_map = {node["name"]: node for node in nodes_data}
     for edge in edges_data:
         if edge["anomaly"]:
@@ -213,63 +189,51 @@ def render_graph() -> None:
             node_map[edge["target"]]["health"] = "ANOMALY"
 
     node_objs = []
-    for info in node_map.values():
-        is_anomaly = info.get("health", "HEALTHY").upper() == "ANOMALY"
+    for node in node_map.values():
+        is_bad = node.get("health") == "ANOMALY"
         node_objs.append(
             Node(
-                id=info["name"],
-                label=info["name"],
-                size=28 if is_anomaly else 22,
-                color="#FF1744" if is_anomaly else "#00FFB0",
-                shadow={"enabled": True, "color": "#FF5E7A" if is_anomaly else "#0BFF95"},
-                borderWidth=3,
+                id=node["name"],
+                label=node["name"],
+                size=30 if is_bad else 22,
+                color="#FF3131" if is_bad else "#39FF14",
+                shadow={"enabled": True, "color": "#FF3131" if is_bad else "#39FF14"},
+                borderWidth=4 if is_bad else 2,
+                font={"color": "#ffffff"},
             )
         )
 
     edge_objs = []
     for edge in edges_data:
-        is_anomaly = edge["anomaly"]
-        color = "#FF5C8A" if pulse and is_anomaly else "#FF2F5E" if is_anomaly else "#00E7A8"
+        source_bad = node_map.get(edge["source"], {}).get("health") == "ANOMALY"
+        target_bad = node_map.get(edge["target"], {}).get("health") == "ANOMALY"
+        anomaly_link = source_bad and target_bad
+        color = "#FF3131" if anomaly_link else "rgba(57,255,20,0.4)"
         edge_objs.append(
             Edge(
                 source=edge["source"],
                 target=edge["target"],
                 color=color,
-                width=4 if is_anomaly else 2,
-                dashes=is_anomaly,
+                width=4 if anomaly_link else 1,
                 smooth={"enabled": True, "type": "continuous"},
+                dashes=anomaly_link,
                 title=f"{edge['source']} ▶ {edge['target']} · {edge['latency']:.0f} ms",
             )
         )
 
     config = Config(
-        width=1500,
-        height=660,
+        width=1600,
+        height=640,
         directed=True,
         physics=True,
         nodeHighlightBehavior=True,
         highlightColor="#FFFFFF",
-        background="#010409",
+        background="#000000",
     )
-
-    st.markdown('<div class="soc-panel">', unsafe_allow_html=True)
-    st.markdown("### Topology Map")
+    st.markdown('<div class="panel"><div class="glow" style="margin-bottom:10px;">CYBER TOPOLOGY</div>', unsafe_allow_html=True)
     agraph(node_objs, edge_objs, config)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
 render_graph()
-
-alerts_table = pd.DataFrame(
-    [
-        {"timestamp": datetime.utcnow().strftime("%H:%M:%S"), "anomaly": "payments→db", "status": "Critical"},
-        {"timestamp": (datetime.utcnow()).strftime("%H:%M:%S"), "anomaly": "inventory→edge-cache", "status": "Warning"},
-    ]
-)
-
-st.markdown('<div class="soc-panel">', unsafe_allow_html=True)
-st.markdown("### Intrusion Events")
-st.dataframe(alerts_table, width="stretch", height=200)
-st.markdown("</div>", unsafe_allow_html=True)
-
 st.markdown("</div>", unsafe_allow_html=True)
