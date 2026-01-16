@@ -4,6 +4,18 @@ from __future__ import annotations
 import streamlit as st
 
 st.set_page_config(page_title="SENTRINODE", layout="wide")
+st.markdown(
+    """
+    <style>
+    /* This targets the search/toolbar container specifically */
+    [data-testid="stHeader"] {
+        display: none !important;
+    }
+    /* This removes the anchor/link padding usually found at the top */ .main .block-container { padding-top: 1rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 import os
 from datetime import datetime
