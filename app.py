@@ -189,44 +189,31 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
 ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
 
-def _ensure_license(driver: GraphDatabase.driver) -> dict[str, object] | None:
+def _verify_license() -> bool:
+    """Ensure the local serial exists in Neo4j and return True unless marked expired."""
     if not LICENSE_SERIAL:
-        return None
-    with driver.session() as session:
-        record = session.run(
-            """
-            MERGE (l:License {serial:$serial})
-            ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp()
-            SET l.created_at = coalesce(l.created_at, l.updated, timestamp()),
-                l.last_seen = timestamp()
-            RETURN l.status AS status, l.type AS type, l.created_at AS created_at
-            """,
-            serial=LICENSE_SERIAL,
-        ).single()
-    return record
-
-
-def _license_is_active() -> bool:
+        return False
     if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
         return True
     driver = None
     try:
         driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
-        record = _ensure_license(driver)
+        with driver.session() as session:
+            record = session.run(
+                """
+                MERGE (l:License {serial:$serial})
+                ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp()
+                SET l.updated = timestamp(),
+                    l.last_seen = timestamp(),
+                    l.created_at = coalesce(l.created_at, l.updated, timestamp())
+                RETURN l.status AS status
+                """,
+                serial=LICENSE_SERIAL,
+            ).single()
         if not record:
             return False
         status = str(record["status"] or "").lower()
-        lic_type = str(record.get("type") or "").lower()
-        created_at = record.get("created_at")
-        if status == "paid":
-            return True
-        if created_at is None:
-            return False
-        age_seconds = (datetime.utcnow().timestamp() * 1000) - float(created_at)
-        seven_days_ms = 7 * 24 * 60 * 60 * 1000
-        if age_seconds <= seven_days_ms and status == "active":
-            return True
-        return False
+        return status != "expired"
     except Exception:
         return False
     finally:
@@ -235,7 +222,7 @@ def _license_is_active() -> bool:
 
 
 def _sync_license_state() -> None:
-    st.session_state["disabled"] = not _license_is_active()
+    st.session_state["disabled"] = not _verify_license()
 
 
 def _authenticate(username: str, password: str) -> bool:
