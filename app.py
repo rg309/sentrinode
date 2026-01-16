@@ -47,35 +47,63 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
-    .login-logo {
-        text-align: center;
+    .login-wrapper {
+        min-height: 90vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .login-box {
+        width: 100%;
+        max-width: 420px;
+        background-color: #111a2c;
+        border: 1px solid #1f2a3d;
+        border-radius: 6px;
+        padding: 36px 32px;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    .login-box h1 {
         margin-bottom: 24px;
         letter-spacing: 0.35em;
         font-size: 1.1rem;
+        text-align: center;
         color: #f8fafc;
     }
-    .stButton>button {
+    .login-subtext {
+        color:#94a3b8;
+        text-align:center;
+        margin-bottom:18px;
+        font-size:0.9rem;
+        letter-spacing:0.1em;
+        text-transform:uppercase;
+    }
+    .login-box button {
+        width: 100%;
         background-color: #1d4ed8 !important;
         color: #f8fafc !important;
-        border: 1px solid #1d4ed8;
+        border: none;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
+AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
+AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
+if "disabled" not in st.session_state:
+    st.session_state["disabled"] = True
 
 
 @st.cache_data(ttl=45)
 def _fetch_topology() -> tuple[bool, list[dict[str, object]]]:
-    uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    user = os.getenv("NEO4J_USER", "neo4j")
-    password = os.getenv("NEO4J_PASSWORD", "password")
     driver = None
     try:
-        driver = GraphDatabase.driver(uri, auth=(user, password))
+        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
         with driver.session() as session:
             records = session.run(
                 """
@@ -157,35 +185,100 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-AUTH_LICENSE = os.getenv("SENTRINODE_LICENSE", "GUILD-ACCESS-2026")
-AUTH_PASSWORD = os.getenv("SENTRINODE_PASS", "sentri-ops")
+ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
 
-def _authenticate(license_key: str, password: str) -> bool:
+def _ensure_license(driver: GraphDatabase.driver) -> dict[str, object] | None:
+    with driver.session() as session:
+        record = session.run(
+            """
+            MERGE (l:License {serial:$serial})
+            ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp()
+            RETURN l.status AS status, l.type AS type, l.created_at AS created_at
+            """,
+            serial=AUTH_PASSWORD,
+        ).single()
+    return record
+
+
+def _license_is_active() -> bool:
+    if ADMIN_KEY and AUTH_PASSWORD == ADMIN_KEY:
+        return True
+    driver = None
+    try:
+        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
+        record = _ensure_license(driver)
+        if not record:
+            return False
+        status = str(record["status"] or "").lower()
+        lic_type = str(record.get("type") or "").lower()
+        created_at = record.get("created_at")
+        if status == "paid":
+            return True
+        if created_at is None:
+            return False
+        age_seconds = (datetime.utcnow().timestamp() * 1000) - float(created_at)
+        seven_days_ms = 7 * 24 * 60 * 60 * 1000
+        if age_seconds <= seven_days_ms and status == "active":
+            return True
+        return False
+    except Exception:
+        return False
+    finally:
+        if driver:
+            driver.close()
+
+
+def _sync_license_state() -> None:
+    st.session_state["disabled"] = not _license_is_active()
+
+
+def _authenticate(username: str, password: str) -> bool:
     return bool(
-        license_key
+        username
         and password
-        and license_key.strip() == AUTH_LICENSE
+        and username.strip().lower() == AUTH_USERNAME.lower()
         and password == AUTH_PASSWORD
     )
 
 
 def _render_login() -> None:
-    st.markdown("<div style='height:12vh;'></div>", unsafe_allow_html=True)
-    _, center_col, _ = st.columns([3, 2, 3])
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+    _, center_col, _ = st.columns([1.2, 0.8, 1.2])
     with center_col:
-        st.markdown("<div class='login-logo'>SENTRINODE</div>", unsafe_allow_html=True)
-        st.markdown("<div style='color:#94a3b8; text-align:center; margin-bottom:18px;'>Causal Intelligence Console</div>", unsafe_allow_html=True)
-        license_key = st.text_input("License Key", value="", key="license-input")
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
+        st.markdown("<div class='login-subtext'>Causal Intelligence Console</div>", unsafe_allow_html=True)
+        username = st.text_input("Username", value="", key="username-input")
         password = st.text_input("Password", value="", type="password", key="password-input")
-        sign_in = st.button("Sign In", use_container_width=True)
-        if sign_in:
-            if _authenticate(license_key, password):
+        if st.button("Sign In", use_container_width=True):
+            if _authenticate(username, password):
                 st.session_state["logged_in"] = True
-                st.experimental_rerun()
+                st.rerun()
             else:
-                st.error("Access denied. Check your license and password.")
+                st.error("Access denied. Check your credentials.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+
+def _render_disabled() -> None:
+    st.markdown(
+        """
+        <div style="min-height:90vh;display:flex;align-items:center;justify-content:center;background:#0f172a;">
+            <div style="border:1px solid #7f1d1d;background:#1c0f0f;padding:48px 60px;border-radius:8px;text-align:center;">
+                <div style="letter-spacing:0.3em;color:#f87171;font-size:1.5rem;margin-bottom:16px;">LICENSE EXPIRED</div>
+                <div style="color:#fecaca;font-size:1rem;">CONTACT SUPPORT TO RESTORE ACCESS</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_sync_license_state()
+if st.session_state.get("disabled", True):
+    _render_disabled()
+    st.stop()
 
 if not st.session_state["logged_in"]:
     _render_login()
