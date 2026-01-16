@@ -93,6 +93,47 @@ section[data-testid="stSidebar"] {
 .logo-left {
     margin: 16px 0 12px 0;
 }
+.logo-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.status-indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+}
+.status-indicator.online {
+    background: #34d399;
+    box-shadow: 0 0 14px rgba(52, 211, 153, 0.9);
+    animation: statusPulse 1.8s ease-out infinite;
+}
+.status-indicator.offline {
+    background: #f87171;
+    box-shadow: 0 0 10px rgba(248, 113, 113, 0.8);
+}
+@keyframes statusPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 14px rgba(52, 211, 153, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    }
+}
+.status-message {
+    color: #f87171;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    margin: 8px 0 0 0;
+}
+.status-message.centered {
+    text-align: center;
+}
 .logo-center {
     text-align: center;
     margin: 0 0 16px 0;
@@ -167,16 +208,43 @@ def _inject_styles() -> None:
 
 def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
     alignment = "logo-center" if centered else "logo-left"
+    online, status_msg = _neo4j_health()
+    indicator_state = "online" if online else "offline"
     st.markdown(
-        f"<div class='{alignment}'><div class='sentri-logo main'>SENTRINODE</div></div>",
+        (
+            f"<div class='{alignment}'>"
+            "<div class='logo-status'>"
+            "<div class='sentri-logo main'>SENTRINODE</div>"
+            f"<div class='status-indicator {indicator_state}' title='{status_msg}' aria-label='{status_msg}'></div>"
+            "</div>"
+            "</div>"
+        ),
         unsafe_allow_html=True,
     )
+    if not online:
+        msg_class = "status-message centered" if centered else "status-message"
+        st.markdown(f"<div class='{msg_class}'>{status_msg}</div>", unsafe_allow_html=True)
     if caption:
         st.markdown(f"<div class='logo-caption'>{caption}</div>", unsafe_allow_html=True)
 
 
 def _neo4j_driver():
     return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+
+@st.cache_data(ttl=25)
+def _neo4j_health() -> tuple[bool, str]:
+    driver = None
+    try:
+        driver = _neo4j_driver()
+        with driver.session() as session:
+            session.run("RETURN 1").consume()
+        return True, "Live"
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False, "Reconnecting..."
+    finally:
+        if driver:
+            driver.close()
 
 
 def _license_registered(serial: str) -> bool:
