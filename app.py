@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-st.set_page_config(page_title="SentriNode Console", layout="wide")
+st.set_page_config(page_title="SENTRINODE", layout="wide")
 
 st.markdown(
     """
@@ -86,7 +86,7 @@ st.markdown(
     }
     .brand-title .brand-name,
     .sidebar-brand .brand-name {
-        letter-spacing: 8px;
+        letter-spacing: 10px;
         background: linear-gradient(90deg, #06b6d4, #ffffff);
         -webkit-background-clip: text;
         background-clip: text;
@@ -149,7 +149,7 @@ st.markdown(
     .registration-box h1 {
         margin-bottom: 6px;
         margin-top: 0;
-        letter-spacing: 8px;
+        letter-spacing: 10px;
         font-size: 1.2rem;
         text-align: left;
         color: #f8fafc;
@@ -371,7 +371,7 @@ def _fetch_license_status() -> tuple[bool, str | None]:
     if not LICENSE_SERIAL:
         return False, None
     if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
-        return True, "paid"
+        return True, "active"
     driver = None
     try:
         driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
@@ -386,8 +386,8 @@ def _fetch_license_status() -> tuple[bool, str | None]:
         if not record:
             # Hardware ID not found in Neo4j - needs registration
             return True, None
-        status = str(record["status"] or "").lower() or "active"
-        return True, status
+        # If found, always return active (removed expired check)
+        return True, "active"
     except Exception:
         return False, None
     finally:
@@ -411,6 +411,7 @@ def _get_license_profile(serial: str) -> dict[str, object] | None:
                        l.type AS type,
                        l.admin AS admin,
                        l.company AS company,
+                       l.email AS email,
                        l.serial AS serial
                 """,
                 serial=serial,
@@ -422,6 +423,7 @@ def _get_license_profile(serial: str) -> dict[str, object] | None:
             "type": record.get("type"),
             "admin": record.get("admin"),
             "company": record.get("company"),
+            "email": record.get("email"),
             "serial": record.get("serial") or serial,
         }
     except Exception:
@@ -431,7 +433,7 @@ def _get_license_profile(serial: str) -> dict[str, object] | None:
             driver.close()
 
 
-def _register_license(admin_name: str, company: str) -> bool:
+def _register_license(admin_name: str, company: str, email: str) -> bool:
     """Create the license node with provided metadata and unlock immediately."""
     if not LICENSE_SERIAL:
         st.session_state["registration_error"] = "Missing hardware identifier."
@@ -448,12 +450,14 @@ def _register_license(admin_name: str, company: str) -> bool:
                     l.type = coalesce(l.type, 'trial'),
                     l.admin = $admin,
                     l.company = $company,
+                    l.email = $email,
                     l.updated = timestamp(),
                     l.last_seen = timestamp()
                 """,
                 serial=LICENSE_SERIAL,
                 admin=admin_name.strip(),
                 company=company.strip(),
+                email=email.strip(),
             )
         return True
     except Exception as exc:  # pragma: no cover - Streamlit UI
@@ -464,7 +468,7 @@ def _register_license(admin_name: str, company: str) -> bool:
             driver.close()
 
 
-def _update_license_profile(admin_name: str, company: str) -> bool:
+def _update_license_profile(admin_name: str, company: str, email: str) -> bool:
     """Persist profile edits to Neo4j."""
     if not LICENSE_SERIAL:
         st.session_state["registration_error"] = "Missing hardware identifier."
@@ -478,11 +482,13 @@ def _update_license_profile(admin_name: str, company: str) -> bool:
                 MATCH (l:License {serial:$serial})
                 SET l.admin = $admin,
                     l.company = $company,
+                    l.email = $email,
                     l.updated = timestamp()
                 """,
                 serial=LICENSE_SERIAL,
                 admin=admin_name.strip(),
                 company=company.strip(),
+                email=email.strip(),
             )
         return True
     except Exception as exc:  # pragma: no cover - Streamlit UI
@@ -538,24 +544,28 @@ def _render_registration() -> None:
     </style>
     """, unsafe_allow_html=True)
     st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
-    st.markdown("<div class='registration-eyebrow'>System Registration</div>", unsafe_allow_html=True)
+    st.markdown("<div class='registration-eyebrow'>Node Registration</div>", unsafe_allow_html=True)
     st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
     st.markdown(
         "<p class='registration-subtext'>Link this appliance to your SentriNode license. Provide admin contact and deployment location.</p>",
         unsafe_allow_html=True,
     )
     with st.form("registration-form"):
-        st.markdown("<label class='input-label'>Admin Name</label>", unsafe_allow_html=True)
-        admin_name = st.text_input("Admin Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
-        st.markdown("<label class='input-label'>Company / Location</label>", unsafe_allow_html=True)
-        company = st.text_input("Company / Location", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
+        st.markdown("<label class='input-label'>Name</label>", unsafe_allow_html=True)
+        admin_name = st.text_input("Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
+        st.markdown("<label class='input-label'>Company</label>", unsafe_allow_html=True)
+        company = st.text_input("Company", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
+        st.markdown("<label class='input-label'>Email</label>", unsafe_allow_html=True)
+        email = st.text_input("Email", value="", label_visibility="collapsed", placeholder="Enter your email address")
         submitted = st.form_submit_button("Register Node", use_container_width=True)
         if submitted:
             if not admin_name.strip():
-                st.session_state["registration_error"] = "Admin Name is required."
+                st.session_state["registration_error"] = "Name is required."
             elif not company.strip():
-                st.session_state["registration_error"] = "Company / Location is required."
-            elif _register_license(admin_name, company):
+                st.session_state["registration_error"] = "Company is required."
+            elif not email.strip():
+                st.session_state["registration_error"] = "Email is required."
+            elif _register_license(admin_name, company, email):
                 st.session_state["registration_error"] = ""
                 st.success("Node registered. Loading console...")
                 st.rerun()
@@ -569,18 +579,6 @@ def _render_registration() -> None:
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
-def _render_disabled() -> None:
-    st.markdown(
-        """
-        <div style="min-height:90vh;display:flex;align-items:center;justify-content:center;background:#0f172a;">
-            <div style="border:1px solid #7f1d1d;background:#1c0f0f;padding:48px 60px;border-radius:8px;text-align:center;">
-                <div style="letter-spacing:0.3em;color:#f87171;font-size:1.5rem;margin-bottom:16px;">LICENSE EXPIRED</div>
-                <div style="color:#fecaca;font-size:1rem;">CONTACT SUPPORT TO RESTORE ACCESS</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def _render_account_settings(license_status: str) -> None:
@@ -588,27 +586,23 @@ def _render_account_settings(license_status: str) -> None:
     profile = _get_license_profile(LICENSE_SERIAL)
     if not profile:
         st.warning("Unable to load account details from Neo4j.")
-    status = (profile.get("status") if profile else license_status) or "unknown"
-    status_key = status.lower()
-    badge_color = "#22c55e"
-    if status_key not in ("active", "paid"):
-        badge_color = "#fbbf24" if status_key in ("trial", "pending") else "#ef4444"
     
-    # Display Name and Company prominently
+    # Display user details
     admin_name = (profile or {}).get("admin") or "—"
     company = (profile or {}).get("company") or "—"
+    email = (profile or {}).get("email") or "—"
     
     st.markdown(f"**Name:** {admin_name}")
     st.markdown(f"**Company:** {company}")
+    st.markdown(f"**Email:** {email}")
     st.markdown("")
+    # Always show Status: Active badge
     st.markdown(
-        f"<span style='padding:6px 14px;border-radius:4px;background:{badge_color};color:#0f172a;font-weight:600;'>Status: Active</span>",
+        "<span style='padding:6px 14px;border-radius:4px;background:#22c55e;color:#0f172a;font-weight:600;'>Status: Active</span>",
         unsafe_allow_html=True,
     )
     st.write("")
     info = {
-        "Admin Name": (profile or {}).get("admin") or "—",
-        "Company / Location": (profile or {}).get("company") or "—",
         "Hardware ID": LICENSE_SERIAL or "Unavailable",
         "License Type": (profile or {}).get("type") or "trial",
     }
@@ -623,11 +617,12 @@ def _render_account_settings(license_status: str) -> None:
 
     if st.session_state.get("edit_profile", False):
         with st.form("edit-profile-form"):
-            new_admin = st.text_input("Admin Name", value=(profile or {}).get("admin") or "")
-            new_company = st.text_input("Company / Location", value=(profile or {}).get("company") or "")
+            new_admin = st.text_input("Name", value=(profile or {}).get("admin") or "")
+            new_company = st.text_input("Company", value=(profile or {}).get("company") or "")
+            new_email = st.text_input("Email", value=(profile or {}).get("email") or "")
             save = st.form_submit_button("Save Changes")
             if save:
-                if _update_license_profile(new_admin, new_company):
+                if _update_license_profile(new_admin, new_company, new_email):
                     st.session_state["edit_profile"] = False
                     st.cache_data.clear()
                     st.success("Profile updated.")
@@ -640,8 +635,8 @@ def _render_account_settings(license_status: str) -> None:
     if st.button("Reset Local Session"):
         _reset_local_session()
 connected_license, license_status = _fetch_license_status()
-# Show registration form if Hardware ID not found in Neo4j or if license is expired
-if license_status is None or license_status == "expired":
+# Show registration form if Hardware ID not found in Neo4j
+if license_status is None:
     _render_registration()
     st.stop()
 
@@ -663,8 +658,8 @@ st.sidebar.markdown(
 if not connected_license:
     st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
 st.sidebar.markdown("<div class='nav-heading'>Console</div>", unsafe_allow_html=True)
-view = st.sidebar.radio("Console", ("📊 Real-Time Metrics", "👤 Account Settings"), index=0, label_visibility="collapsed")
-if view == "👤 Account Settings":
+view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0, label_visibility="collapsed")
+if view == "Account Settings":
     _render_account_settings(license_status or "active")
     st.stop()
 
