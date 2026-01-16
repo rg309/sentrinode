@@ -96,6 +96,8 @@ LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
 
 if "registration_error" not in st.session_state:
     st.session_state["registration_error"] = ""
+if "edit_profile" not in st.session_state:
+    st.session_state["edit_profile"] = False
 
 
 @st.cache_data(ttl=45)
@@ -215,6 +217,42 @@ def _fetch_license_status() -> tuple[bool, str | None]:
             driver.close()
 
 
+@st.cache_data(ttl=30)
+def _get_license_profile(serial: str) -> dict[str, object] | None:
+    """Return license node details for profile view."""
+    if not serial:
+        return None
+    driver = None
+    try:
+        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
+        with driver.session() as session:
+            record = session.run(
+                """
+                MATCH (l:License {serial:$serial})
+                RETURN l.status AS status,
+                       l.type AS type,
+                       l.admin AS admin,
+                       l.company AS company,
+                       l.serial AS serial
+                """,
+                serial=serial,
+            ).single()
+        if not record:
+            return None
+        return {
+            "status": record.get("status"),
+            "type": record.get("type"),
+            "admin": record.get("admin"),
+            "company": record.get("company"),
+            "serial": record.get("serial") or serial,
+        }
+    except Exception:
+        return None
+    finally:
+        if driver:
+            driver.close()
+
+
 def _register_license(admin_name: str, company: str) -> bool:
     """Create the license node with provided metadata and unlock immediately."""
     if not LICENSE_SERIAL:
@@ -246,6 +284,43 @@ def _register_license(admin_name: str, company: str) -> bool:
     finally:
         if driver:
             driver.close()
+
+
+def _update_license_profile(admin_name: str, company: str) -> bool:
+    """Persist profile edits to Neo4j."""
+    if not LICENSE_SERIAL:
+        st.session_state["registration_error"] = "Missing hardware identifier."
+        return False
+    driver = None
+    try:
+        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (l:License {serial:$serial})
+                SET l.admin = $admin,
+                    l.company = $company,
+                    l.updated = timestamp()
+                """,
+                serial=LICENSE_SERIAL,
+                admin=admin_name.strip(),
+                company=company.strip(),
+            )
+        return True
+    except Exception as exc:  # pragma: no cover - Streamlit UI
+        st.error(f"Unable to update profile: {exc}")
+        return False
+    finally:
+        if driver:
+            driver.close()
+
+
+def _reset_local_session() -> None:
+    """Clear cached data so the node can re-register."""
+    st.cache_data.clear()
+    st.session_state.clear()
+    st.success("Session reset. Reloading...")
+    st.rerun()
 
 
 def _render_registration() -> None:
@@ -282,15 +357,71 @@ def _render_disabled() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_account_settings(license_status: str) -> None:
+    st.markdown("## Account Settings")
+    profile = _get_license_profile(LICENSE_SERIAL)
+    if not profile:
+        st.warning("Unable to load account details from Neo4j.")
+    status = (profile.get("status") if profile else license_status) or "unknown"
+    status_key = status.lower()
+    badge_color = "#22c55e"
+    if status_key not in ("active", "paid"):
+        badge_color = "#fbbf24" if status_key in ("trial", "pending") else "#ef4444"
+    st.markdown(
+        f"<span style='padding:6px 14px;border-radius:4px;background:{badge_color};color:#0f172a;font-weight:600;'>Status: {status.title()}</span>",
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    info = {
+        "Admin Name": (profile or {}).get("admin") or "—",
+        "Company / Location": (profile or {}).get("company") or "—",
+        "Hardware ID": LICENSE_SERIAL or "Unavailable",
+        "License Type": (profile or {}).get("type") or "trial",
+    }
+    for label, value in info.items():
+        st.markdown(f"**{label}**")
+        st.write(value)
+        st.divider()
+
+    if st.button("Edit Profile", disabled=st.session_state.get("edit_profile", False)):
+        st.session_state["edit_profile"] = True
+        st.rerun()
+
+    if st.session_state.get("edit_profile", False):
+        with st.form("edit-profile-form"):
+            new_admin = st.text_input("Admin Name", value=(profile or {}).get("admin") or "")
+            new_company = st.text_input("Company / Location", value=(profile or {}).get("company") or "")
+            save = st.form_submit_button("Save Changes")
+            if save:
+                if _update_license_profile(new_admin, new_company):
+                    st.session_state["edit_profile"] = False
+                    st.cache_data.clear()
+                    st.success("Profile updated.")
+                    st.rerun()
+        if st.button("Cancel Edit"):
+            st.session_state["edit_profile"] = False
+            st.rerun()
+
+    st.write("")
+    if st.button("Reset Local Session"):
+        _reset_local_session()
 connected_license, license_status = _fetch_license_status()
-if connected_license and license_status is None:
+if not connected_license:
+    st.warning("Unable to reach licensing service. Running in offline mode.")
+if license_status is None:
     _render_registration()
     st.stop()
 if license_status == "expired":
     _render_disabled()
     st.stop()
-if not connected_license and license_status is None:
-    st.warning("Unable to reach licensing service. Running in offline mode.")
+
+st.sidebar.markdown("### Navigation")
+view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0)
+if view == "Account Settings":
+    _render_account_settings(license_status or "active")
+    st.stop()
 
 
 connected, topology = _fetch_topology()
