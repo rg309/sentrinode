@@ -102,11 +102,11 @@ st.markdown(
         width: 100%;
     }
     .registration-wrapper {
-        min-height: calc(100vh - 60px);
+        min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 60px 20px;
+        padding: 24px;
         background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
     }
     .registration-box {
