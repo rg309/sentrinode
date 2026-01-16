@@ -47,6 +47,28 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
+    .brand-title {
+        font-size: 1.1rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        color: #f8fafc;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+    }
+    .brand-title .brand-name {
+        letter-spacing: 0.5em;
+    }
+    .brand-title .brand-divider {
+        letter-spacing: 0.3em;
+        color: #38bdf8;
+    }
+    .brand-title .brand-tag {
+        letter-spacing: 0.3em;
+        color: #cbd5f5;
+    }
     .registration-wrapper {
         min-height: 90vh;
         display: flex;
@@ -429,7 +451,16 @@ active_nodes, p99_latency, system_health, anomaly_count = _compute_metrics(topol
 log_output = _event_log(topology)
 dep_table = _dependency_table(topology)
 
-st.markdown("## SENTRINODE // **CAUSAL INTELLIGENCE**")
+st.markdown(
+    """
+    <div class="brand-title">
+        <span class="brand-name">SENTRINODE</span>
+        <span class="brand-divider">//</span>
+        <span class="brand-tag">CAUSAL INTELLIGENCE</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Active Nodes", str(active_nodes), "Live" if connected else "Fallback")
 col2.metric("P99 Latency", f"{p99_latency:.0f}ms", "-4ms")
