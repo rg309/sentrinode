@@ -1,295 +1,243 @@
 #!/usr/bin/env python3
-"""SentriNode Industrial Pro console."""
 from __future__ import annotations
 
-from datetime import datetime
+import streamlit as st
+
+st.set_page_config(page_title="SENTRINODE", layout="wide")
+
 import os
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
-try:
-    from streamlit_agraph import agraph, Node, Edge, Config
+try:  # Optional service graph rendering
+    from streamlit_agraph import agraph, Config, Edge, Node
 except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-st.set_page_config(page_title="SENTRINODE", layout="wide")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+LICENSE_SERIAL = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
 
-# ============================================================================
-# REGISTRATION CHECK - MUST BE AT TOP BEFORE ANY DASHBOARD CODE
-# ============================================================================
 
-# Get environment variables for license check
-NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
-AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
-AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
+GLOBAL_STYLE = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Syncopate:wght@700&display=swap');
 
-# Initialize session state
-if "registration_error" not in st.session_state:
-    st.session_state["registration_error"] = ""
-if "edit_profile" not in st.session_state:
-    st.session_state["edit_profile"] = False
+.stApp, html, body {
+    background-color: #010714;
+    color: #e2e8f0;
+    font-family: 'Inter', sans-serif;
+}
+.block-container {
+    padding-top: 0rem !important;
+    padding-left: 3.25rem;
+    padding-right: 3.25rem;
+}
+header[data-testid="stHeader"], footer, #MainMenu {
+    display: none;
+}
+section[data-testid="stSidebar"] {
+    background: #020c1f;
+    border-right: 1px solid rgba(148, 163, 184, 0.2);
+}
+.sentri-logo {
+    font-family: 'Syncopate', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 10px;
+    background: linear-gradient(115deg, #03caff, #ffffff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin: 0;
+}
+.sentri-logo.main {
+    font-size: 2.4rem;
+}
+.sentri-logo.small {
+    font-size: 1.2rem;
+    letter-spacing: 8px;
+}
+.logo-left {
+    margin: 32px 0 12px 0;
+}
+.logo-center {
+    text-align: center;
+    margin: 48px 0 16px 0;
+}
+.logo-caption {
+    text-transform: uppercase;
+    letter-spacing: 0.35em;
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-bottom: 32px;
+}
+.onboarding-stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+}
+.onboarding-card {
+    width: 100%;
+    max-width: 460px;
+    background: rgba(8, 15, 35, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 35px 75px rgba(0, 0, 0, 0.55);
+}
+.onboarding-card h3 {
+    margin: 0 0 12px 0;
+    letter-spacing: 0.4em;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+}
+.onboarding-card p {
+    margin-top: 0;
+    color: #94a3b8;
+    letter-spacing: 0.05em;
+}
+.form-error {
+    margin-top: 18px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    color: #fecaca;
+    font-size: 0.85rem;
+}
+.panel {
+    background: rgba(13, 17, 31, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 14px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.panel h4 {
+    margin-top: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    font-size: 0.8rem;
+    color: #cbd5f5;
+}
+.event-log, .table-panel {
+    background: rgba(6, 9, 20, 0.9);
+    border-radius: 14px;
+    padding: 1.2rem;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+}
+.event-log pre {
+    font-size: 0.85rem;
+}
+</style>
+"""
 
-# Minimal registration CSS - loaded first
-st.markdown(
-    """
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Syncopate:wght@700&display=swap" rel="stylesheet">
-    <style>
-    .stApp {
-        background-color: #0f172a;
-        color: #f8fafc;
-        font-family: 'Inter', sans-serif;
-    }
-    header, footer, #MainMenu {visibility: hidden;}
-    .main .block-container {
-        padding-top: 0 !important;
-        padding-left: 3rem;
-        padding-right: 3rem;
-        padding-bottom: 3rem;
-    }
-    section[data-testid="stSidebar"] {
-        background: #080f1c;
-        border-right: 1px solid #1b2440;
-        font-family: 'Inter', sans-serif;
-    }
-    /* Hide sidebar during registration */
-    .registration-mode section[data-testid="stSidebar"] {
-        display: none !important;
-    }
-    .registration-mode .main .block-container {
-        padding: 0 !important;
-        max-width: 100% !important;
-    }
-    section[data-testid="stSidebar"] > div {
-        padding-top: 0 !important;
-    }
-    div[data-testid="metric-container"] {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 4px;
-        padding: 20px;
-    }
-    .log-panel, .table-panel {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        padding: 16px 20px;
-    }
-    .log-panel h3, .table-panel h3 {
-        margin-top: 0;
-        font-size: 1rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #cbd5f5;
-    }
-    .brand-title, .sidebar-brand {
-        font-size: 1.1rem;
-        display: inline-flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 8px;
-        text-transform: uppercase;
-        font-weight: 600;
-        letter-spacing: 0.25em;
-        font-family: 'Syncopate', sans-serif;
-    }
-    .brand-title .brand-name,
-    .sidebar-brand .brand-name {
-        letter-spacing: 10px;
-        background: linear-gradient(90deg, #06b6d4, #ffffff);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
-    .brand-title .brand-divider,
-    .sidebar-brand .brand-divider {
-        letter-spacing: 0.4em;
-        color: #38bdf8;
-        font-weight: 400;
-    }
-    .brand-title .brand-tag,
-    .sidebar-brand .brand-tag {
-        letter-spacing: 0.35em;
-        color: #cbd5f5;
-        font-weight: 500;
-    }
-    .sidebar-brand {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        padding: 20px 16px 8px;
-        border-bottom: 1px solid #1c2a4a;
-        width: 100%;
-    }
-    .registration-wrapper {
-        min-height: 100vh;
-        height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 16px;
-        background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
-        margin: 0;
-        width: 100%;
-        box-sizing: border-box;
-        overflow-y: auto;
-    }
-    .registration-box {
-        width: 100%;
-        max-width: 420px;
-        background-color: #111a2c;
-        border: 1px solid #1f2a3d;
-        border-radius: 10px;
-        padding: 20px 18px;
-        box-shadow: 0 25px 50px rgba(15,23,42,0.65);
-        margin: auto;
-        box-sizing: border-box;
-    }
-    .registration-eyebrow {
-        letter-spacing: 0.6em;
-        color: #38bdf8;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        margin-bottom: 6px;
-        margin-top: 0;
-    }
-    .registration-box h1 {
-        margin-bottom: 6px;
-        margin-top: 0;
-        letter-spacing: 10px;
-        font-size: 1.2rem;
-        text-align: left;
-        color: #f8fafc;
-        font-family: 'Syncopate', sans-serif;
-        font-weight: 700;
-        background: linear-gradient(90deg, #06b6d4, #ffffff);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        text-transform: uppercase;
-    }
-    .registration-subtext {
-        color:#94a3b8;
-        margin-bottom:14px;
-        font-size:0.8rem;
-        letter-spacing:0.08em;
-        text-transform:none;
-        line-height: 1.3;
-    }
-    .input-label {
-        font-size: 0.75rem;
-        letter-spacing: 0.2em;
-        text-transform: uppercase;
-        color: #cbd5f5;
-        margin-bottom: 6px;
-        margin-top: 12px;
-        display: block;
-    }
-    .input-label:first-of-type {
-        margin-top: 0;
-    }
-    .registration-box .stTextInput {
-        margin-bottom: 0;
-    }
-    .registration-box .stTextInput>div>div>input {
-        background: #0b1425;
-        border: 1px solid #1f2a3d;
-        border-radius: 6px;
-        color: #f8fafc;
-        padding: 8px 12px;
-        font-size: 0.9rem;
-        margin-bottom: 0;
-    }
-    .registration-box .stTextInput>div>div>input:focus {
-        border-color: #38bdf8;
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1);
-    }
-    .registration-box .stTextInput>div>div>input::placeholder {
-        color: #64748b;
-    }
-    .registration-box .stForm {
-        margin-bottom: 0;
-    }
-    .registration-box button, .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #2563eb, #0ea5e9) !important;
-        color: #f8fafc !important;
-        border: none;
-        font-weight: 600;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        padding: 10px !important;
-        margin-top: 12px;
-        margin-bottom: 0;
-    }
-    .nav-heading {
-        font-size: 0.85rem;
-        letter-spacing: 0.4em;
-        text-transform: uppercase;
-        color: #94a3b8;
-        margin: 16px 0 8px;
-        font-weight: 600;
-    }
-    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
-        gap: 8px;
-    }
-    section[data-testid="stSidebar"] .stRadio label {
-        background: #0f172a;
-        border: 1px solid transparent;
-        padding: 8px 12px;
-        border-radius: 6px;
-        transition: border 0.2s ease, background 0.2s ease;
-    }
-    section[data-testid="stSidebar"] .stRadio label:hover {
-        border-color: #1d4ed8;
-    }
-    section[data-testid="stSidebar"] .stRadio label span {
-        font-weight: 500;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-    }
-    section[data-testid="stSidebar"] .stRadio label:nth-of-type(1) span:before {
-        font-family: "Font Awesome 6 Free";
-        font-weight: 900;
-        content: "\\f080";
-        color: #38bdf8;
-    }
-    section[data-testid="stSidebar"] .stRadio label:nth-of-type(2) span:before {
-        font-family: "Font Awesome 6 Free";
-        font-weight: 900;
-        content: "\\f007";
-        color: #fde68a;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
-# Initialize session state
-if "registration_error" not in st.session_state:
-    st.session_state["registration_error"] = ""
-if "edit_profile" not in st.session_state:
-    st.session_state["edit_profile"] = False
+def _inject_styles() -> None:
+    st.markdown(GLOBAL_STYLE, unsafe_allow_html=True)
+
+
+def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
+    alignment = "logo-center" if centered else "logo-left"
+    st.markdown(
+        f"<div class='{alignment}'><div class='sentri-logo main'>SENTRINODE</div></div>",
+        unsafe_allow_html=True,
+    )
+    if caption:
+        st.markdown(f"<div class='logo-caption'>{caption}</div>", unsafe_allow_html=True)
+
+
+def _neo4j_driver():
+    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+
+def _license_registered(serial: str) -> bool:
+    if not serial:
+        return False
+    driver = None
+    try:
+        driver = _neo4j_driver()
+        with driver.session() as session:
+            record = session.run(
+                "MATCH (l:License {serial:$serial}) RETURN l.serial AS serial LIMIT 1",
+                serial=serial,
+            ).single()
+        return bool(record)
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False
+    finally:
+        if driver:
+            driver.close()
+
+
+def _create_license(serial: str, admin: str, company: str, email: str) -> bool:
+    driver = None
+    try:
+        driver = _neo4j_driver()
+        with driver.session() as session:
+            session.run(
+                """
+                MERGE (l:License {serial:$serial})
+                ON CREATE SET l.created_at = timestamp()
+                SET l.admin = $admin,
+                    l.company = $company,
+                    l.email = $email,
+                    l.status = 'active',
+                    l.updated = timestamp(),
+                    l.last_seen = timestamp()
+                """,
+                serial=serial,
+                admin=admin.strip(),
+                company=company.strip(),
+                email=email.strip(),
+            )
+        return True
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False
+    finally:
+        if driver:
+            driver.close()
+
+
+@st.cache_data(ttl=30)
+def _get_license_profile(serial: str) -> dict[str, object] | None:
+    if not serial:
+        return None
+    driver = None
+    try:
+        driver = _neo4j_driver()
+        with driver.session() as session:
+            record = session.run(
+                """
+                MATCH (l:License {serial:$serial})
+                RETURN l.admin AS admin,
+                       l.company AS company,
+                       l.email AS email,
+                       l.status AS status,
+                       l.type AS type
+                """,
+                serial=serial,
+            ).single()
+        return dict(record) if record else None
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return None
+    finally:
+        if driver:
+            driver.close()
 
 
 @st.cache_data(ttl=45)
 def _fetch_topology() -> tuple[bool, list[dict[str, object]]]:
     driver = None
     try:
-        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
+        driver = _neo4j_driver()
         with driver.session() as session:
             records = session.run(
                 """
@@ -300,13 +248,13 @@ def _fetch_topology() -> tuple[bool, list[dict[str, object]]]:
                        coalesce(r.latency_ms, rand()*400) AS latency
                 """
             )
-            return True, [dict(record) for record in records]
+        return True, [dict(record) for record in records]
     except (ServiceUnavailable, Neo4jError, ValueError):
         fallback = [
-            {"source": "edge-lb", "target": "api-gateway", "rel": "ROUTES", "latency": 80.0},
-            {"source": "api-gateway", "target": "auth-service", "rel": "CALLS", "latency": 210.0},
-            {"source": "api-gateway", "target": "payments", "rel": "CALLS", "latency": 260.0},
-            {"source": "payments", "target": "db-cluster", "rel": "WRITES", "latency": 420.0},
+            {"source": "edge-lb", "target": "api-gateway", "rel": "ROUTES", "latency": 70.0},
+            {"source": "api-gateway", "target": "auth", "rel": "CALLS", "latency": 210.0},
+            {"source": "api-gateway", "target": "billing", "rel": "CALLS", "latency": 260.0},
+            {"source": "billing", "target": "db", "rel": "WRITES", "latency": 430.0},
         ]
         return False, fallback
     finally:
@@ -326,7 +274,7 @@ def _compute_metrics(records: list[dict[str, object]]) -> tuple[int, float, floa
     active_nodes = len(node_names)
     p99_latency = float(np.percentile(latencies, 99)) if latencies else 0.0
     anomaly_count = sum(1 for latency in latencies if latency >= 400)
-    system_health = max(0.0, 100.0 - anomaly_count * 8)
+    system_health = max(0.0, 100.0 - anomaly_count * 7.5)
     return active_nodes, p99_latency, system_health, anomaly_count
 
 
@@ -334,14 +282,15 @@ def _event_log(records: list[dict[str, object]]) -> str:
     lines: list[str] = []
     now = datetime.utcnow()
     for idx, entry in enumerate(records[:6]):
-        ts = (now.replace(microsecond=0)).strftime("%H:%M:%S")
+        ts = now.strftime("%H:%M:%S")
+        latency = entry.get("latency", 0)
         lines.append(
-            f"{ts} - TRACE: {entry['source'].upper()} -> {entry['target'].upper()} · {entry.get('latency', 0):.0f}ms"
+            f"{ts} · TRACE · {entry['source'].upper()} ➝ {entry['target'].upper()} · {latency:.0f}ms"
         )
-        if idx == 0 and entry.get("latency", 0) >= 400:
-            lines.append(f"{ts} - ALERT: Elevated latency detected on {entry['target'].upper()}")
+        if idx == 0 and latency >= 400:
+            lines.append(f"{ts} · ALERT · Elevated latency on {entry['target'].upper()}")
     if not lines:
-        lines.append("No recent events.")
+        lines.append(f"{now.strftime('%H:%M:%S')} · INFO · No telemetry ingested")
     return "\n".join(lines)
 
 
@@ -354,7 +303,7 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
     for service, deps in sorted(dependencies.items()):
         dep_count = len(deps)
         risk = "LOW"
-        status = "Healthy"
+        status = "Stable"
         if dep_count >= 4:
             risk = "CRITICAL"
             status = "Latent"
@@ -371,384 +320,127 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ============================================================================
-# REGISTRATION FUNCTIONS - Must be defined before registration check
-# ============================================================================
-
-ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
-
-
-def _fetch_license_status() -> tuple[bool, str | None]:
-    """Return (connected, status) for the local license node. Returns None if Hardware ID not found in Neo4j."""
-    if not LICENSE_SERIAL:
-        return False, None
-    if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
-        return True, "active"
-    driver = None
-    try:
-        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
-        with driver.session() as session:
-            record = session.run(
-                """
-                MATCH (l:License {serial:$serial})
-                RETURN l.status AS status
-                """,
-                serial=LICENSE_SERIAL,
-            ).single()
-        if not record:
-            # Hardware ID not found in Neo4j - needs registration
-            return True, None
-        # If found, always return active (removed expired check)
-        return True, "active"
-    except Exception:
-        return False, None
-    finally:
-        if driver:
-            driver.close()
-
-
-@st.cache_data(ttl=30)
-def _get_license_profile(serial: str) -> dict[str, object] | None:
-    """Return license node details for profile view."""
-    if not serial:
-        return None
-    driver = None
-    try:
-        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
-        with driver.session() as session:
-            record = session.run(
-                """
-                MATCH (l:License {serial:$serial})
-                RETURN l.status AS status,
-                       l.type AS type,
-                       l.admin AS admin,
-                       l.company AS company,
-                       l.email AS email,
-                       l.serial AS serial
-                """,
-                serial=serial,
-            ).single()
-        if not record:
-            return None
-        return {
-            "status": record.get("status"),
-            "type": record.get("type"),
-            "admin": record.get("admin"),
-            "company": record.get("company"),
-            "email": record.get("email"),
-            "serial": record.get("serial") or serial,
-        }
-    except Exception:
-        return None
-    finally:
-        if driver:
-            driver.close()
-
-
-def _register_license(admin_name: str, company: str, email: str) -> bool:
-    """Create the license node with provided metadata and unlock immediately."""
-    if not LICENSE_SERIAL:
-        st.session_state["registration_error"] = "Missing hardware identifier."
-        return False
-    driver = None
-    try:
-        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
-        with driver.session() as session:
-            session.run(
-                """
-                MERGE (l:License {serial:$serial})
-                ON CREATE SET l.created_at = timestamp()
-                SET l.status='active',
-                    l.type = coalesce(l.type, 'trial'),
-                    l.admin = $admin,
-                    l.company = $company,
-                    l.email = $email,
-                    l.updated = timestamp(),
-                    l.last_seen = timestamp()
-                """,
-                serial=LICENSE_SERIAL,
-                admin=admin_name.strip(),
-                company=company.strip(),
-                email=email.strip(),
-            )
-        return True
-    except Exception as exc:  # pragma: no cover - Streamlit UI
-        st.session_state["registration_error"] = f"Registration failed: {exc}"
-        return False
-    finally:
-        if driver:
-            driver.close()
-
-
-def _update_license_profile(admin_name: str, company: str, email: str) -> bool:
-    """Persist profile edits to Neo4j."""
-    if not LICENSE_SERIAL:
-        st.session_state["registration_error"] = "Missing hardware identifier."
-        return False
-    driver = None
-    try:
-        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
-        with driver.session() as session:
-            session.run(
-                """
-                MATCH (l:License {serial:$serial})
-                SET l.admin = $admin,
-                    l.company = $company,
-                    l.email = $email,
-                    l.updated = timestamp()
-                """,
-                serial=LICENSE_SERIAL,
-                admin=admin_name.strip(),
-                company=company.strip(),
-                email=email.strip(),
-            )
-        return True
-    except Exception as exc:  # pragma: no cover - Streamlit UI
-        st.error(f"Unable to update profile: {exc}")
-        return False
-    finally:
-        if driver:
-            driver.close()
-
-
-def _reset_local_session() -> None:
-    """Clear cached data so the node can re-register."""
-    st.cache_data.clear()
-    st.session_state.clear()
-    st.success("Session reset. Reloading...")
-    st.rerun()
-
-
-def _render_registration() -> None:
-    """Render the registration form in a container and stop execution."""
-    # Hide sidebar during registration and ensure full viewport
-    st.markdown("""
-    <style>
-    section[data-testid="stSidebar"] {
-        display: none !important;
-    }
-    .main .block-container {
-        padding: 0 !important;
-        max-width: 100% !important;
-    }
-    .stApp {
-        overflow: hidden;
-    }
-    [data-testid="stAppViewContainer"] {
-        padding: 0 !important;
-    }
-    .registration-box .stCaption {
-        font-size: 0.75rem !important;
-        margin-top: 4px !important;
-        margin-bottom: 0 !important;
-    }
-    .registration-box form {
-        margin-bottom: 0;
-    }
-    .registration-box [data-testid="stVerticalBlock"] {
-        gap: 0 !important;
-    }
-    .registration-box [data-testid="stVerticalBlock"] > div {
-        margin-bottom: 0 !important;
-    }
-    .registration-box .element-container {
-        margin-bottom: 0 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Wrap registration form in container
-    with st.container():
-        st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
-        st.markdown("<div class='registration-eyebrow'>Node Registration</div>", unsafe_allow_html=True)
-        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        st.markdown(
-            "<p class='registration-subtext'>Link this appliance to your SentriNode license. Provide admin contact and deployment location.</p>",
-            unsafe_allow_html=True,
-        )
-        with st.form("registration-form"):
-            st.markdown("<label class='input-label'>Name</label>", unsafe_allow_html=True)
-            admin_name = st.text_input("Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
-            st.markdown("<label class='input-label'>Company</label>", unsafe_allow_html=True)
-            company = st.text_input("Company", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
-            st.markdown("<label class='input-label'>Email</label>", unsafe_allow_html=True)
-            email = st.text_input("Email", value="", label_visibility="collapsed", placeholder="Enter your email address")
-            submitted = st.form_submit_button("Register Node", use_container_width=True)
-            if submitted:
-                if not admin_name.strip():
-                    st.session_state["registration_error"] = "Name is required."
-                elif not company.strip():
-                    st.session_state["registration_error"] = "Company is required."
-                elif not email.strip():
-                    st.session_state["registration_error"] = "Email is required."
-                elif _register_license(admin_name, company, email):
-                    st.session_state["registration_error"] = ""
-                    st.success("Node registered. Loading console...")
-                    st.rerun()
-        if st.session_state.get("registration_error"):
-            st.markdown(
-                f"<div style='color: #ef4444; padding: 8px 10px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 10px; margin-bottom: 6px; font-size: 0.8rem;'>{st.session_state['registration_error']}</div>",
-                unsafe_allow_html=True
-            )
-        st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-        st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
-    
-    # CRITICAL: Stop execution immediately after registration form
+def _render_onboarding(serial: str) -> None:
+    st.markdown("<div class='onboarding-stage'><div class='onboarding-card'>", unsafe_allow_html=True)
+    _render_logo(centered=True)
+    st.markdown("<h3>System Onboarding</h3>", unsafe_allow_html=True)
+    st.markdown(
+        "<p>Authenticate this appliance with the licensing graph to unlock telemetry and analytics.</p>",
+        unsafe_allow_html=True,
+    )
+    error_msg = ""
+    with st.form("system-onboarding"):
+        admin = st.text_input("Administrator Name")
+        company = st.text_input("Company / Facility")
+        email = st.text_input("Operations Email")
+        submitted = st.form_submit_button("Authorize Node", use_container_width=True)
+        if submitted:
+            if not admin.strip() or not company.strip() or not email.strip():
+                error_msg = "All fields are required."
+            elif _create_license(serial, admin, company, email):
+                st.success("License registered. Reloading console...")
+                st.rerun()
+            else:
+                error_msg = "Unable to reach Neo4j to register this node."
+    if error_msg:
+        st.markdown(f"<div class='form-error'>{error_msg}</div>", unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
 
-
-
-def _render_account_settings(license_status: str) -> None:
-    st.markdown("## Account Settings")
-    profile = _get_license_profile(LICENSE_SERIAL)
-    if not profile:
-        st.warning("Unable to load account details from Neo4j.")
-    
-    # Display user details
-    admin_name = (profile or {}).get("admin") or "—"
-    company = (profile or {}).get("company") or "—"
-    email = (profile or {}).get("email") or "—"
-    
-    st.markdown(f"**Name:** {admin_name}")
-    st.markdown(f"**Company:** {company}")
-    st.markdown(f"**Email:** {email}")
-    st.markdown("")
-    # Always show Status: Active badge
-    st.markdown(
-        "<span style='padding:6px 14px;border-radius:4px;background:#22c55e;color:#0f172a;font-weight:600;'>Status: Active</span>",
+def _render_sidebar() -> str:
+    st.sidebar.markdown(
+        "<div class='sentri-logo small' style='display:block;text-align:center;padding:20px 10px 14px;'>SENTRINODE</div>",
         unsafe_allow_html=True,
     )
-    st.write("")
+    return st.sidebar.radio("Navigation", ("Metrics", "Account"), label_visibility="collapsed")
+
+
+def _render_service_graph(records: list[dict[str, object]]) -> None:
+    if not (agraph and Node and Edge and Config):
+        st.info("Install streamlit-agraph to visualize the real-time topology.")
+        return
+    nodes: list[Node] = []
+    edges: list[Edge] = []
+    known: set[str] = set()
+    for entry in records:
+        for name in (entry["source"], entry["target"]):
+            if name not in known:
+                nodes.append(Node(id=name, label=name, size=18, color="#64748b"))
+                known.add(name)
+        edges.append(
+            Edge(
+                source=entry["source"],
+                target=entry["target"],
+                color="#38bdf8",
+                title=f"{entry.get('rel', 'link')} · {entry.get('latency', 0):.0f}ms",
+            )
+        )
+    config = Config(width=1200, height=480, directed=True, physics=True, hierarchical=True)
+    agraph(nodes=nodes, edges=edges, config=config)
+
+
+def _render_dashboard() -> None:
+    connected, topology = _fetch_topology()
+    active_nodes, p99_latency, system_health, anomaly_count = _compute_metrics(topology)
+    log_output = _event_log(topology)
+    dep_table = _dependency_table(topology)
+
+    _render_logo(caption="Industrial Dashboard Metrics")
+    cols = st.columns(4)
+    cols[0].metric("Active Nodes", str(active_nodes), "Live" if connected else "Fallback")
+    cols[1].metric("P99 Latency", f"{p99_latency:.0f}ms", "-4ms")
+    cols[2].metric("System Health", f"{system_health:.1f}%", "Stable")
+    cols[3].metric("Anomalies", str(anomaly_count), "Clear", delta_color="inverse")
+
+    st.divider()
+    st.markdown("#### Infrastructure Topology")
+    _render_service_graph(topology)
+
+    st.divider()
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Causal Event Log")
+        st.code(log_output, language="bash")
+    with right:
+        st.markdown("#### Dependency Risk")
+        if dep_table.empty:
+            st.info("No dependency data available.")
+        else:
+            st.table(dep_table)
+
+
+def _render_account(serial: str) -> None:
+    _render_logo(caption="Account Console")
+    st.markdown(f"**Hardware Key:** `{serial or 'Unavailable'}`")
+    profile = _get_license_profile(serial)
+    if not profile:
+        st.info("No account metadata stored yet. The license node will populate after registration.")
+        return
     info = {
-        "Hardware ID": LICENSE_SERIAL or "Unavailable",
-        "License Type": (profile or {}).get("type") or "trial",
+        "Administrator": profile.get("admin") or "—",
+        "Company": profile.get("company") or "—",
+        "Email": profile.get("email") or "—",
+        "License Type": profile.get("type") or "trial",
+        "Status": profile.get("status") or "active",
     }
     for label, value in info.items():
         st.markdown(f"**{label}**")
         st.write(value)
         st.divider()
 
-    if st.button("Edit Profile", disabled=st.session_state.get("edit_profile", False)):
-        st.session_state["edit_profile"] = True
-        st.rerun()
 
-    if st.session_state.get("edit_profile", False):
-        with st.form("edit-profile-form"):
-            new_admin = st.text_input("Name", value=(profile or {}).get("admin") or "")
-            new_company = st.text_input("Company", value=(profile or {}).get("company") or "")
-            new_email = st.text_input("Email", value=(profile or {}).get("email") or "")
-            save = st.form_submit_button("Save Changes")
-            if save:
-                if _update_license_profile(new_admin, new_company, new_email):
-                    st.session_state["edit_profile"] = False
-                    st.cache_data.clear()
-                    st.success("Profile updated.")
-                    st.rerun()
-        if st.button("Cancel Edit"):
-            st.session_state["edit_profile"] = False
-            st.rerun()
-
-    st.write("")
-    if st.button("Reset Local Session"):
-        _reset_local_session()
-# ============================================================================
-# REGISTRATION CHECK - EXECUTES FIRST, BEFORE ANY DASHBOARD CODE
-# ============================================================================
-
-# Check license status immediately
-connected_license, license_status = _fetch_license_status()
-
-# If Hardware ID not found in Neo4j, show registration form and STOP
-if license_status is None:
-    _render_registration()  # This function calls st.stop() internally
-
-# ============================================================================
-# INDUSTRIAL DASHBOARD - Only executes after user is verified
-# ============================================================================
-
-# Show sidebar branding and navigation only after registration
-st.sidebar.markdown(
-    """
-    <div class="sidebar-brand">
-        <div>
-            <span class="brand-name">SENTRINODE</span>
-        </div>
-        <div>
-            <span class="brand-divider">//</span>
-            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-if not connected_license:
-    st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
-st.sidebar.markdown("<div class='nav-heading'>Console</div>", unsafe_allow_html=True)
-view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0, label_visibility="collapsed")
-if view == "Account Settings":
-    _render_account_settings(license_status or "active")
-    st.stop()
-
-
-connected, topology = _fetch_topology()
-active_nodes, p99_latency, system_health, anomaly_count = _compute_metrics(topology)
-log_output = _event_log(topology)
-dep_table = _dependency_table(topology)
-
-st.markdown(
-    """
-    <div class="brand-title">
-        <div class="brand-name">SENTRINODE</div>
-        <div>
-            <span class="brand-divider">//</span>
-            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Active Nodes", str(active_nodes), "Live" if connected else "Fallback")
-col2.metric("P99 Latency", f"{p99_latency:.0f}ms", "-4ms")
-col3.metric("System Health", f"{system_health:.1f}%", "Stable")
-col4.metric("Anomalies", str(anomaly_count), "Clear", delta_color="inverse")
-
-st.write("---")
-
-st.subheader("Infrastructure Topology")
-if not agraph or not Node or not Edge or not Config:
-    st.warning("Install streamlit-agraph to render the service graph.")
-else:
-    node_objs: list[Node] = []
-    edge_objs: list[Edge] = []
-    node_names: set[str] = set()
-    for entry in topology:
-        for name in (entry["source"], entry["target"]):
-            if name not in node_names:
-                node_objs.append(Node(id=name, label=name, size=20, color="#64748b"))
-                node_names.add(name)
-        edge_objs.append(
-            Edge(
-                source=entry["source"],
-                target=entry["target"],
-                color="#94a3b8",
-                title=entry.get("rel", "link"),
-            )
-        )
-    graph_config = Config(width=1200, height=500, directed=True, physics=True, hierarchical=True)
-    agraph(nodes=node_objs, edges=edge_objs, config=graph_config)
-
-st.write("---")
-
-left, right = st.columns(2)
-with left:
-    st.subheader("Causal Event Log")
-    st.code(log_output, language="bash")
-with right:
-    st.subheader("Dependency Risk")
-    if dep_table.empty:
-        st.write("No dependency data available.")
+def main() -> None:
+    registered = _license_registered(LICENSE_SERIAL)
+    _inject_styles()
+    if not registered:
+        _render_onboarding(LICENSE_SERIAL)
+    view = _render_sidebar()
+    if view == "Account":
+        _render_account(LICENSE_SERIAL)
     else:
-        st.table(dep_table)
+        _render_dashboard()
+
+
+if __name__ == "__main__":
+    main()
