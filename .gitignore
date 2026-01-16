@@ -35,6 +35,22 @@ bin/
 dist/
 /vendor/
 
+# --- Services & Large Data Files ---
+# Exclude services directory to prevent terminal freezes during Git operations
+services/
+# Large data files
+*.pkl
+*.csv
+*.db
+*.id
+*.log
+neo4j_data/
+export.csv
+training_data.csv
+latency_model_*.pkl
+load_encoder_*.pkl
+service_encoder_*.pkl
+
 # --- OS & Editors ---
 .DS_Store
 .vscode/

@@ -20,10 +20,13 @@ services:
     container_name: sentrinode-ui
     depends_on:
       - sentrinode-agent
+    env_file:
+      - .env
     environment:
       NEO4J_URI: ${NEO4J_URI}
-      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      LICENSE_SERIAL: ${LICENSE_SERIAL:-${NEO4J_PASSWORD}}
     ports:
       - "8501:8501"
     restart: unless-stopped
