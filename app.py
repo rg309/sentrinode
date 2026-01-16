@@ -91,6 +91,7 @@ st.markdown(
 NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
 AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
 AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
 
 
 if "logged_in" not in st.session_state:
@@ -189,6 +190,8 @@ ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
 
 def _ensure_license(driver: GraphDatabase.driver) -> dict[str, object] | None:
+    if not LICENSE_SERIAL:
+        return None
     with driver.session() as session:
         record = session.run(
             """
@@ -198,13 +201,13 @@ def _ensure_license(driver: GraphDatabase.driver) -> dict[str, object] | None:
                 l.last_seen = timestamp()
             RETURN l.status AS status, l.type AS type, l.created_at AS created_at
             """,
-            serial=AUTH_PASSWORD,
+            serial=LICENSE_SERIAL,
         ).single()
     return record
 
 
 def _license_is_active() -> bool:
-    if ADMIN_KEY and AUTH_PASSWORD == ADMIN_KEY:
+    if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
         return True
     driver = None
     try:
