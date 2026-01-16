@@ -520,7 +520,7 @@ def _render_account_settings(license_status: str) -> None:
         _reset_local_session()
 connected_license, license_status = _fetch_license_status()
 if not connected_license:
-    st.warning("Unable to reach licensing service. Running in offline mode.")
+    st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
 if license_status is None:
     _render_registration()
     st.stop()
@@ -543,9 +543,11 @@ dep_table = _dependency_table(topology)
 st.markdown(
     """
     <div class="brand-title">
-        <span class="brand-name">SENTRINODE</span>
-        <span class="brand-divider">//</span>
-        <span class="brand-tag">CAUSAL INTELLIGENCE</span>
+        <div class="brand-name">SENTRINODE</div>
+        <div>
+            <span class="brand-divider">//</span>
+            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
