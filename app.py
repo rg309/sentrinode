@@ -84,7 +84,7 @@ section[data-testid="stSidebar"] {
     background: rgba(8, 15, 35, 0.95);
     border: 1px solid rgba(148, 163, 184, 0.25);
     border-radius: 16px;
-    padding: 28px 32px;
+    padding: 0 32px 32px;
     box-shadow: 0 35px 75px rgba(0, 0, 0, 0.55);
 }
 .onboarding-card h3 {
