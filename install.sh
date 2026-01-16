@@ -75,7 +75,7 @@ PY
 
   if [ -z "$current_status" ]; then
     create_payload=$(cat <<JSON
-{"statements":[{"statement":"MERGE (l:License {serial:$serial}) SET l.status='active', l.type='trial', l.updated=timestamp() RETURN l.status","parameters":{"serial":"$SERIAL_NUMBER"}}]}
+{"statements":[{"statement":"MERGE (l:License {serial:$serial}) ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp() SET l.updated=timestamp(), l.last_seen=timestamp() RETURN l.status","parameters":{"serial":"$SERIAL_NUMBER"}}]}
 JSON
 )
     create_resp=$(curl -sS -u "$NEO4J_USER:$API_KEY" -H "Content-Type: application/json" -d "$create_payload" "$NEO4J_HTTP/db/neo4j/tx/commit") || {

@@ -194,6 +194,8 @@ def _ensure_license(driver: GraphDatabase.driver) -> dict[str, object] | None:
             """
             MERGE (l:License {serial:$serial})
             ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp()
+            SET l.created_at = coalesce(l.created_at, l.updated, timestamp()),
+                l.last_seen = timestamp()
             RETURN l.status AS status, l.type AS type, l.created_at AS created_at
             """,
             serial=AUTH_PASSWORD,
