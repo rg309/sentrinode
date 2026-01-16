@@ -21,6 +21,10 @@ st.set_page_config(page_title="SentriNode Console", layout="wide")
 
 st.markdown(
     """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
     .stApp {
         background-color: #0f172a;
@@ -28,6 +32,17 @@ st.markdown(
         font-family: 'Inter', sans-serif;
     }
     header, footer, #MainMenu {visibility: hidden;}
+    .main .block-container {
+        padding-top: 0 !important;
+    }
+    section[data-testid="stSidebar"] {
+        background: #080f1c;
+        border-right: 1px solid #1b2440;
+        font-family: 'Inter', sans-serif;
+    }
+    section[data-testid="stSidebar"] > div {
+        padding-top: 0 !important;
+    }
     div[data-testid="metric-container"] {
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -47,27 +62,44 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
-    .brand-title {
+    .brand-title, .sidebar-brand {
         font-size: 1.1rem;
         display: inline-flex;
         align-items: center;
         gap: 12px;
         margin-bottom: 8px;
         text-transform: uppercase;
-        color: #f8fafc;
         font-weight: 600;
-        letter-spacing: 0.2em;
+        letter-spacing: 0.25em;
+        font-family: 'Syncopate', sans-serif;
     }
-    .brand-title .brand-name {
-        letter-spacing: 0.5em;
+    .brand-title .brand-name,
+    .sidebar-brand .brand-name {
+        letter-spacing: 0.6rem;
+        background: linear-gradient(90deg, #06b6d4, #f8fafc);
+        -webkit-background-clip: text;
+        color: transparent;
+        font-weight: 700;
     }
-    .brand-title .brand-divider {
-        letter-spacing: 0.3em;
+    .brand-title .brand-divider,
+    .sidebar-brand .brand-divider {
+        letter-spacing: 0.4em;
         color: #38bdf8;
+        font-weight: 400;
     }
-    .brand-title .brand-tag {
-        letter-spacing: 0.3em;
+    .brand-title .brand-tag,
+    .sidebar-brand .brand-tag {
+        letter-spacing: 0.35em;
         color: #cbd5f5;
+        font-weight: 500;
+    }
+    .sidebar-brand {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 20px 16px 8px;
+        border-bottom: 1px solid #1c2a4a;
+        width: 100%;
     }
     .registration-wrapper {
         min-height: 90vh;
@@ -86,10 +118,11 @@ st.markdown(
     }
     .registration-box h1 {
         margin-bottom: 24px;
-        letter-spacing: 0.35em;
+        letter-spacing: 0.45em;
         font-size: 1.1rem;
         text-align: center;
         color: #f8fafc;
+        font-family: 'Syncopate', sans-serif;
     }
     .registration-subtext {
         color:#94a3b8;
@@ -105,7 +138,63 @@ st.markdown(
         color: #f8fafc !important;
         border: none;
     }
+    .nav-heading {
+        font-size: 0.85rem;
+        letter-spacing: 0.4em;
+        text-transform: uppercase;
+        color: #94a3b8;
+        margin: 16px 0 8px;
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+        gap: 8px;
+    }
+    section[data-testid="stSidebar"] .stRadio label {
+        background: #0f172a;
+        border: 1px solid transparent;
+        padding: 8px 12px;
+        border-radius: 6px;
+        transition: border 0.2s ease, background 0.2s ease;
+    }
+    section[data-testid="stSidebar"] .stRadio label:hover {
+        border-color: #1d4ed8;
+    }
+    section[data-testid="stSidebar"] .stRadio label span {
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+    }
+    section[data-testid="stSidebar"] .stRadio label:nth-of-type(1) span:before {
+        font-family: "Font Awesome 6 Free";
+        font-weight: 900;
+        content: "\\f080";
+        color: #38bdf8;
+    }
+    section[data-testid="stSidebar"] .stRadio label:nth-of-type(2) span:before {
+        font-family: "Font Awesome 6 Free";
+        font-weight: 900;
+        content: "\\f007";
+        color: #fde68a;
+    }
     </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.sidebar.markdown(
+    """
+    <div class="sidebar-brand">
+        <div>
+            <span class="brand-name">SENTRINODE</span>
+        </div>
+        <div>
+            <span class="brand-divider">//</span>
+            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
+        </div>
+    </div>
     """,
     unsafe_allow_html=True,
 )
@@ -439,8 +528,8 @@ if license_status == "expired":
     _render_disabled()
     st.stop()
 
-st.sidebar.markdown("### Navigation")
-view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0)
+st.sidebar.markdown("<div class='nav-heading'>Console</div>", unsafe_allow_html=True)
+view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0, label_visibility="collapsed")
 if view == "Account Settings":
     _render_account_settings(license_status or "active")
     st.stop()
