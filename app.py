@@ -116,13 +116,16 @@ st.markdown(
     }
     .registration-wrapper {
         min-height: 100vh;
+        height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 24px;
+        padding: 20px;
         background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
         margin: 0;
         width: 100%;
+        box-sizing: border-box;
+        overflow-y: auto;
     }
     .registration-box {
         width: 100%;
@@ -130,20 +133,24 @@ st.markdown(
         background-color: #111a2c;
         border: 1px solid #1f2a3d;
         border-radius: 10px;
-        padding: 40px 36px;
+        padding: 28px 24px;
         box-shadow: 0 25px 50px rgba(15,23,42,0.65);
+        margin: auto;
+        box-sizing: border-box;
     }
     .registration-eyebrow {
         letter-spacing: 0.6em;
         color: #38bdf8;
         font-size: 0.75rem;
         text-transform: uppercase;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
+        margin-top: 0;
     }
     .registration-box h1 {
-        margin-bottom: 12px;
+        margin-bottom: 8px;
+        margin-top: 0;
         letter-spacing: 8px;
-        font-size: 1.5rem;
+        font-size: 1.4rem;
         text-align: left;
         color: #f8fafc;
         font-family: 'Syncopate', sans-serif;
@@ -156,8 +163,8 @@ st.markdown(
     }
     .registration-subtext {
         color:#94a3b8;
-        margin-bottom:24px;
-        font-size:0.95rem;
+        margin-bottom:20px;
+        font-size:0.9rem;
         letter-spacing:0.08em;
         text-transform:none;
         line-height: 1.4;
@@ -167,8 +174,12 @@ st.markdown(
         letter-spacing: 0.2em;
         text-transform: uppercase;
         color: #cbd5f5;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
+        margin-top: 16px;
         display: block;
+    }
+    .input-label:first-of-type {
+        margin-top: 0;
     }
     .registration-box .stTextInput>div>div>input {
         background: #0b1425;
@@ -481,7 +492,7 @@ def _reset_local_session() -> None:
 
 
 def _render_registration() -> None:
-    # Hide sidebar during registration
+    # Hide sidebar during registration and ensure full viewport
     st.markdown("""
     <style>
     section[data-testid="stSidebar"] {
@@ -490,6 +501,12 @@ def _render_registration() -> None:
     .main .block-container {
         padding: 0 !important;
         max-width: 100% !important;
+    }
+    .stApp {
+        overflow: hidden;
+    }
+    [data-testid="stAppViewContainer"] {
+        padding: 0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -504,10 +521,8 @@ def _render_registration() -> None:
     with st.form("registration-form"):
         st.markdown("<label class='input-label'>Admin Name</label>", unsafe_allow_html=True)
         admin_name = st.text_input("Admin Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
-        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<label class='input-label'>Company / Location</label>", unsafe_allow_html=True)
         company = st.text_input("Company / Location", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
-        st.markdown("<br>", unsafe_allow_html=True)
         submitted = st.form_submit_button("Register Node", use_container_width=True)
         if submitted:
             if not admin_name.strip():
@@ -520,10 +535,10 @@ def _render_registration() -> None:
                 st.rerun()
     if st.session_state.get("registration_error"):
         st.markdown(
-            f"<div style='color: #ef4444; padding: 12px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin: 16px 0;'>{st.session_state['registration_error']}</div>",
+            f"<div style='color: #ef4444; padding: 12px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 16px; margin-bottom: 12px;'>{st.session_state['registration_error']}</div>",
             unsafe_allow_html=True
         )
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
     st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
     st.markdown("</div></div>", unsafe_allow_html=True)
 
