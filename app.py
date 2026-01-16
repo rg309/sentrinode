@@ -47,13 +47,13 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
-    .login-wrapper {
+    .registration-wrapper {
         min-height: 90vh;
         display: flex;
         align-items: center;
         justify-content: center;
     }
-    .login-box {
+    .registration-box {
         width: 100%;
         max-width: 420px;
         background-color: #111a2c;
@@ -62,14 +62,14 @@ st.markdown(
         padding: 36px 32px;
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }
-    .login-box h1 {
+    .registration-box h1 {
         margin-bottom: 24px;
         letter-spacing: 0.35em;
         font-size: 1.1rem;
         text-align: center;
         color: #f8fafc;
     }
-    .login-subtext {
+    .registration-subtext {
         color:#94a3b8;
         text-align:center;
         margin-bottom:18px;
@@ -77,7 +77,7 @@ st.markdown(
         letter-spacing:0.1em;
         text-transform:uppercase;
     }
-    .login-box button {
+    .registration-box button, .stButton>button {
         width: 100%;
         background-color: #1d4ed8 !important;
         color: #f8fafc !important;
@@ -94,10 +94,8 @@ AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
 
 
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-if "disabled" not in st.session_state:
-    st.session_state["disabled"] = True
+if "registration_error" not in st.session_state:
+    st.session_state["registration_error"] = ""
 
 
 @st.cache_data(ttl=45)
@@ -189,66 +187,85 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
 ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
 
-def _verify_license() -> bool:
-    """Ensure the local serial exists in Neo4j and return True unless marked expired."""
+def _fetch_license_status() -> tuple[bool, str | None]:
+    """Return (connected, status) for the local license node."""
     if not LICENSE_SERIAL:
-        return False
+        return False, None
     if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
-        return True
+        return True, "paid"
     driver = None
     try:
         driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
         with driver.session() as session:
             record = session.run(
                 """
-                MERGE (l:License {serial:$serial})
-                ON CREATE SET l.status='active', l.type='trial', l.created_at=timestamp()
-                SET l.updated = timestamp(),
-                    l.last_seen = timestamp(),
-                    l.created_at = coalesce(l.created_at, l.updated, timestamp())
+                MATCH (l:License {serial:$serial})
                 RETURN l.status AS status
                 """,
                 serial=LICENSE_SERIAL,
             ).single()
         if not record:
-            return False
-        status = str(record["status"] or "").lower()
-        return status != "expired"
+            return True, None
+        status = str(record["status"] or "").lower() or "active"
+        return True, status
     except Exception:
+        return False, None
+    finally:
+        if driver:
+            driver.close()
+
+
+def _register_license(admin_name: str, company: str) -> bool:
+    """Create the license node with provided metadata and unlock immediately."""
+    if not LICENSE_SERIAL:
+        st.session_state["registration_error"] = "Missing hardware identifier."
+        return False
+    driver = None
+    try:
+        driver = GraphDatabase.driver(NEO4J_BOLT_URI, auth=(AUTH_USERNAME, AUTH_PASSWORD))
+        with driver.session() as session:
+            session.run(
+                """
+                MERGE (l:License {serial:$serial})
+                ON CREATE SET l.created_at = timestamp()
+                SET l.status='active',
+                    l.type = coalesce(l.type, 'trial'),
+                    l.admin = $admin,
+                    l.company = $company,
+                    l.updated = timestamp(),
+                    l.last_seen = timestamp()
+                """,
+                serial=LICENSE_SERIAL,
+                admin=admin_name.strip(),
+                company=company.strip(),
+            )
+        return True
+    except Exception as exc:  # pragma: no cover - Streamlit UI
+        st.session_state["registration_error"] = f"Registration failed: {exc}"
         return False
     finally:
         if driver:
             driver.close()
 
 
-def _sync_license_state() -> None:
-    st.session_state["disabled"] = not _verify_license()
-
-
-def _authenticate(username: str, password: str) -> bool:
-    return bool(
-        username
-        and password
-        and username.strip().lower() == AUTH_USERNAME.lower()
-        and password == AUTH_PASSWORD
-    )
-
-
-def _render_login() -> None:
-    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+def _render_registration() -> None:
+    st.markdown('<div class="registration-wrapper">', unsafe_allow_html=True)
     _, center_col, _ = st.columns([1.2, 0.8, 1.2])
     with center_col:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown('<div class="registration-box">', unsafe_allow_html=True)
         st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        st.markdown("<div class='login-subtext'>Causal Intelligence Console</div>", unsafe_allow_html=True)
-        username = st.text_input("Username", value="", key="username-input")
-        password = st.text_input("Password", value="", type="password", key="password-input")
-        if st.button("Sign In", use_container_width=True):
-            if _authenticate(username, password):
-                st.session_state["logged_in"] = True
-                st.rerun()
-            else:
-                st.error("Access denied. Check your credentials.")
+        st.markdown("<div class='registration-subtext'>Node Registration</div>", unsafe_allow_html=True)
+        with st.form("registration-form"):
+            admin_name = st.text_input("Admin Name", value="")
+            company = st.text_input("Company / Location", value="")
+            submitted = st.form_submit_button("Register Node", use_container_width=True)
+            if submitted:
+                if _register_license(admin_name, company):
+                    st.session_state["registration_error"] = ""
+                    st.success("Node registered. Loading console...")
+                    st.rerun()
+        if st.session_state.get("registration_error"):
+            st.error(st.session_state["registration_error"])
         st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -265,16 +282,15 @@ def _render_disabled() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-
-_sync_license_state()
-if st.session_state.get("disabled", True):
+connected_license, license_status = _fetch_license_status()
+if connected_license and license_status is None:
+    _render_registration()
+    st.stop()
+if license_status == "expired":
     _render_disabled()
     st.stop()
-
-if not st.session_state["logged_in"]:
-    _render_login()
-    st.stop()
+if not connected_license and license_status is None:
+    st.warning("Unable to reach licensing service. Running in offline mode.")
 
 
 connected, topology = _fetch_topology()
