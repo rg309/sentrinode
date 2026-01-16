@@ -187,18 +187,20 @@ def _authenticate(license_key: str, password: str) -> bool:
 
 
 def _render_login() -> None:
-    login_container = st.container()
-    with login_container:
+    placeholder = st.empty()
+    with placeholder.container():
         st.markdown('<div class="login-wrapper"><div class="login-box">', unsafe_allow_html=True)
         st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        license_key = st.text_input("License Key", value="", key="license-input")
-        password = st.text_input("Password", value="", type="password", key="password-input")
-        if st.button("Sign In", use_container_width=True):
-            if _authenticate(license_key, password):
-                st.session_state["logged_in"] = True
-                st.experimental_rerun()
-            else:
-                st.error("Access denied. Check your license and password.")
+        with st.form("sentrinode-login"):
+            license_key = st.text_input("License Key", value="", key="license-input")
+            password = st.text_input("Password", value="", type="password", key="password-input")
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+            if submitted:
+                if _authenticate(license_key, password):
+                    st.session_state["logged_in"] = True
+                    st.experimental_rerun()
+                else:
+                    st.error("Access denied. Check your license and password.")
         st.markdown("</div></div>", unsafe_allow_html=True)
 
 
