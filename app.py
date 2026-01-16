@@ -19,12 +19,28 @@ except Exception:  # pragma: no cover - optional dependency
 
 st.set_page_config(page_title="SENTRINODE", layout="wide")
 
+# ============================================================================
+# REGISTRATION CHECK - MUST BE AT TOP BEFORE ANY DASHBOARD CODE
+# ============================================================================
+
+# Get environment variables for license check
+NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
+AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
+AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
+
+# Initialize session state
+if "registration_error" not in st.session_state:
+    st.session_state["registration_error"] = ""
+if "edit_profile" not in st.session_state:
+    st.session_state["edit_profile"] = False
+
+# Minimal registration CSS - loaded first
 st.markdown(
     """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Syncopate:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
     .stApp {
         background-color: #0f172a;
@@ -262,15 +278,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Sidebar branding - only show if not in registration mode
-# This will be conditionally rendered after license check
-
-NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
-AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
-AUTH_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-LICENSE_SERIAL = os.getenv("LICENSE_SERIAL") or AUTH_PASSWORD
-
-
+# Initialize session state
 if "registration_error" not in st.session_state:
     st.session_state["registration_error"] = ""
 if "edit_profile" not in st.session_state:
@@ -362,6 +370,10 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
         )
     return pd.DataFrame(rows)
 
+
+# ============================================================================
+# REGISTRATION FUNCTIONS - Must be defined before registration check
+# ============================================================================
 
 ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
@@ -508,6 +520,7 @@ def _reset_local_session() -> None:
 
 
 def _render_registration() -> None:
+    """Render the registration form in a container and stop execution."""
     # Hide sidebar during registration and ensure full viewport
     st.markdown("""
     <style>
@@ -543,40 +556,46 @@ def _render_registration() -> None:
     }
     </style>
     """, unsafe_allow_html=True)
-    st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
-    st.markdown("<div class='registration-eyebrow'>Node Registration</div>", unsafe_allow_html=True)
-    st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-    st.markdown(
-        "<p class='registration-subtext'>Link this appliance to your SentriNode license. Provide admin contact and deployment location.</p>",
-        unsafe_allow_html=True,
-    )
-    with st.form("registration-form"):
-        st.markdown("<label class='input-label'>Name</label>", unsafe_allow_html=True)
-        admin_name = st.text_input("Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
-        st.markdown("<label class='input-label'>Company</label>", unsafe_allow_html=True)
-        company = st.text_input("Company", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
-        st.markdown("<label class='input-label'>Email</label>", unsafe_allow_html=True)
-        email = st.text_input("Email", value="", label_visibility="collapsed", placeholder="Enter your email address")
-        submitted = st.form_submit_button("Register Node", use_container_width=True)
-        if submitted:
-            if not admin_name.strip():
-                st.session_state["registration_error"] = "Name is required."
-            elif not company.strip():
-                st.session_state["registration_error"] = "Company is required."
-            elif not email.strip():
-                st.session_state["registration_error"] = "Email is required."
-            elif _register_license(admin_name, company, email):
-                st.session_state["registration_error"] = ""
-                st.success("Node registered. Loading console...")
-                st.rerun()
-    if st.session_state.get("registration_error"):
+    
+    # Wrap registration form in container
+    with st.container():
+        st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
+        st.markdown("<div class='registration-eyebrow'>Node Registration</div>", unsafe_allow_html=True)
+        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
         st.markdown(
-            f"<div style='color: #ef4444; padding: 8px 10px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 10px; margin-bottom: 6px; font-size: 0.8rem;'>{st.session_state['registration_error']}</div>",
-            unsafe_allow_html=True
+            "<p class='registration-subtext'>Link this appliance to your SentriNode license. Provide admin contact and deployment location.</p>",
+            unsafe_allow_html=True,
         )
-    st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-    st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
-    st.markdown("</div></div>", unsafe_allow_html=True)
+        with st.form("registration-form"):
+            st.markdown("<label class='input-label'>Name</label>", unsafe_allow_html=True)
+            admin_name = st.text_input("Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
+            st.markdown("<label class='input-label'>Company</label>", unsafe_allow_html=True)
+            company = st.text_input("Company", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
+            st.markdown("<label class='input-label'>Email</label>", unsafe_allow_html=True)
+            email = st.text_input("Email", value="", label_visibility="collapsed", placeholder="Enter your email address")
+            submitted = st.form_submit_button("Register Node", use_container_width=True)
+            if submitted:
+                if not admin_name.strip():
+                    st.session_state["registration_error"] = "Name is required."
+                elif not company.strip():
+                    st.session_state["registration_error"] = "Company is required."
+                elif not email.strip():
+                    st.session_state["registration_error"] = "Email is required."
+                elif _register_license(admin_name, company, email):
+                    st.session_state["registration_error"] = ""
+                    st.success("Node registered. Loading console...")
+                    st.rerun()
+        if st.session_state.get("registration_error"):
+            st.markdown(
+                f"<div style='color: #ef4444; padding: 8px 10px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 10px; margin-bottom: 6px; font-size: 0.8rem;'>{st.session_state['registration_error']}</div>",
+                unsafe_allow_html=True
+            )
+        st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+        st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
+        st.markdown("</div></div>", unsafe_allow_html=True)
+    
+    # CRITICAL: Stop execution immediately after registration form
+    st.stop()
 
 
 
@@ -634,11 +653,20 @@ def _render_account_settings(license_status: str) -> None:
     st.write("")
     if st.button("Reset Local Session"):
         _reset_local_session()
+# ============================================================================
+# REGISTRATION CHECK - EXECUTES FIRST, BEFORE ANY DASHBOARD CODE
+# ============================================================================
+
+# Check license status immediately
 connected_license, license_status = _fetch_license_status()
-# Show registration form if Hardware ID not found in Neo4j
+
+# If Hardware ID not found in Neo4j, show registration form and STOP
 if license_status is None:
-    _render_registration()
-    st.stop()
+    _render_registration()  # This function calls st.stop() internally
+
+# ============================================================================
+# INDUSTRIAL DASHBOARD - Only executes after user is verified
+# ============================================================================
 
 # Show sidebar branding and navigation only after registration
 st.sidebar.markdown(
