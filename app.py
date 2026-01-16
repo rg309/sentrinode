@@ -47,10 +47,41 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
+    .login-wrapper {
+        min-height: 90vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .login-box {
+        width: 100%;
+        max-width: 420px;
+        background-color: #111a2c;
+        border: 1px solid #1f2a3d;
+        border-radius: 6px;
+        padding: 36px 32px;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    .login-box h1 {
+        margin-bottom: 24px;
+        letter-spacing: 0.3em;
+        font-size: 1.1rem;
+        text-align: center;
+        color: #f8fafc;
+    }
+    .login-box button {
+        width: 100%;
+        background-color: #1d4ed8 !important;
+        color: #f8fafc !important;
+        border: none;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
 
 @st.cache_data(ttl=45)
@@ -140,6 +171,42 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+AUTH_LICENSE = os.getenv("SENTRINODE_LICENSE", "GUILD-ACCESS-2026")
+AUTH_PASSWORD = os.getenv("SENTRINODE_PASS", "sentri-ops")
+
+
+def _authenticate(license_key: str, password: str) -> bool:
+    return bool(
+        license_key
+        and password
+        and license_key.strip() == AUTH_LICENSE
+        and password == AUTH_PASSWORD
+    )
+
+
+def _render_login() -> None:
+    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1.2, 0.8, 1.2])
+    with c2:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
+        license_key = st.text_input("License Key", value="", type="default")
+        password = st.text_input("Password", value="", type="password")
+        if st.button("Sign In"):
+            if _authenticate(license_key, password):
+                st.session_state["logged_in"] = True
+                st.experimental_rerun()
+            else:
+                st.error("Access denied. Check your license and password.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+if not st.session_state["logged_in"]:
+    _render_login()
+    st.stop()
 
 
 connected, topology = _fetch_topology()
