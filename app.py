@@ -43,6 +43,14 @@ st.markdown(
         border-right: 1px solid #1b2440;
         font-family: 'Inter', sans-serif;
     }
+    /* Hide sidebar during registration */
+    .registration-mode section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+    .registration-mode .main .block-container {
+        padding: 0 !important;
+        max-width: 100% !important;
+    }
     section[data-testid="stSidebar"] > div {
         padding-top: 0 !important;
     }
@@ -113,6 +121,8 @@ st.markdown(
         justify-content: center;
         padding: 24px;
         background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
+        margin: 0;
+        width: 100%;
     }
     .registration-box {
         width: 100%;
@@ -132,11 +142,17 @@ st.markdown(
     }
     .registration-box h1 {
         margin-bottom: 12px;
-        letter-spacing: 0.5em;
-        font-size: 1.2rem;
+        letter-spacing: 8px;
+        font-size: 1.5rem;
         text-align: left;
         color: #f8fafc;
         font-family: 'Syncopate', sans-serif;
+        font-weight: 700;
+        background: linear-gradient(90deg, #06b6d4, #ffffff);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        text-transform: uppercase;
     }
     .registration-subtext {
         color:#94a3b8;
@@ -159,9 +175,16 @@ st.markdown(
         border: 1px solid #1f2a3d;
         border-radius: 6px;
         color: #f8fafc;
+        padding: 12px 16px;
+        font-size: 0.95rem;
     }
     .registration-box .stTextInput>div>div>input:focus {
         border-color: #38bdf8;
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1);
+    }
+    .registration-box .stTextInput>div>div>input::placeholder {
+        color: #64748b;
     }
     .registration-box button, .stButton>button {
         width: 100%;
@@ -218,20 +241,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.sidebar.markdown(
-    """
-    <div class="sidebar-brand">
-        <div>
-            <span class="brand-name">SENTRINODE</span>
-        </div>
-        <div>
-            <span class="brand-divider">//</span>
-            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# Sidebar branding - only show if not in registration mode
+# This will be conditionally rendered after license check
 
 NEO4J_BOLT_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
 AUTH_USERNAME = os.getenv("NEO4J_USER", "neo4j")
@@ -470,6 +481,18 @@ def _reset_local_session() -> None:
 
 
 def _render_registration() -> None:
+    # Hide sidebar during registration
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+    .main .block-container {
+        padding: 0 !important;
+        max-width: 100% !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
     st.markdown("<div class='registration-eyebrow'>System Registration</div>", unsafe_allow_html=True)
     st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
@@ -480,17 +503,27 @@ def _render_registration() -> None:
     )
     with st.form("registration-form"):
         st.markdown("<label class='input-label'>Admin Name</label>", unsafe_allow_html=True)
-        admin_name = st.text_input("Admin Name", value="", label_visibility="collapsed")
+        admin_name = st.text_input("Admin Name", value="", label_visibility="collapsed", placeholder="Enter your full name")
+        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<label class='input-label'>Company / Location</label>", unsafe_allow_html=True)
-        company = st.text_input("Company / Location", value="", label_visibility="collapsed")
+        company = st.text_input("Company / Location", value="", label_visibility="collapsed", placeholder="Enter company or deployment location")
+        st.markdown("<br>", unsafe_allow_html=True)
         submitted = st.form_submit_button("Register Node", use_container_width=True)
         if submitted:
-            if _register_license(admin_name, company):
+            if not admin_name.strip():
+                st.session_state["registration_error"] = "Admin Name is required."
+            elif not company.strip():
+                st.session_state["registration_error"] = "Company / Location is required."
+            elif _register_license(admin_name, company):
                 st.session_state["registration_error"] = ""
                 st.success("Node registered. Loading console...")
                 st.rerun()
     if st.session_state.get("registration_error"):
-        st.error(st.session_state["registration_error"])
+        st.markdown(
+            f"<div style='color: #ef4444; padding: 12px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin: 16px 0;'>{st.session_state['registration_error']}</div>",
+            unsafe_allow_html=True
+        )
+    st.markdown("<br>", unsafe_allow_html=True)
     st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
     st.markdown("</div></div>", unsafe_allow_html=True)
 
@@ -566,13 +599,28 @@ def _render_account_settings(license_status: str) -> None:
     if st.button("Reset Local Session"):
         _reset_local_session()
 connected_license, license_status = _fetch_license_status()
-if not connected_license:
-    st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
 # Show registration form if Hardware ID not found in Neo4j or if license is expired
 if license_status is None or license_status == "expired":
     _render_registration()
     st.stop()
 
+# Show sidebar branding and navigation only after registration
+st.sidebar.markdown(
+    """
+    <div class="sidebar-brand">
+        <div>
+            <span class="brand-name">SENTRINODE</span>
+        </div>
+        <div>
+            <span class="brand-divider">//</span>
+            <span class="brand-tag">CAUSAL INTELLIGENCE</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+if not connected_license:
+    st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
 st.sidebar.markdown("<div class='nav-heading'>Console</div>", unsafe_allow_html=True)
 view = st.sidebar.radio("Console", ("📊 Real-Time Metrics", "👤 Account Settings"), index=0, label_visibility="collapsed")
 if view == "👤 Account Settings":
