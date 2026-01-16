@@ -187,21 +187,19 @@ def _authenticate(license_key: str, password: str) -> bool:
 
 
 def _render_login() -> None:
-    st.markdown('<div class="login-wrapper">', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1.2, 0.8, 1.2])
-    with c2:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+    login_container = st.container()
+    with login_container:
+        st.markdown('<div class="login-wrapper"><div class="login-box">', unsafe_allow_html=True)
         st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        license_key = st.text_input("License Key", value="", type="default")
-        password = st.text_input("Password", value="", type="password")
-        if st.button("Sign In"):
+        license_key = st.text_input("License Key", value="", key="license-input")
+        password = st.text_input("Password", value="", type="password", key="password-input")
+        if st.button("Sign In", use_container_width=True):
             if _authenticate(license_key, password):
                 st.session_state["logged_in"] = True
                 st.experimental_rerun()
             else:
                 st.error("Access denied. Check your license and password.")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 if not st.session_state["logged_in"]:
