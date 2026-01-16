@@ -80,9 +80,9 @@ section[data-testid="stSidebar"] {
 .onboarding-stage {
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 2rem 1rem 3rem;
+    padding: 3rem 1rem;
 }
 .onboarding-card {
     width: 100%;
