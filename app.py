@@ -120,7 +120,7 @@ st.markdown(
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 20px;
+        padding: 16px;
         background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
         margin: 0;
         width: 100%;
@@ -129,11 +129,11 @@ st.markdown(
     }
     .registration-box {
         width: 100%;
-        max-width: 480px;
+        max-width: 420px;
         background-color: #111a2c;
         border: 1px solid #1f2a3d;
         border-radius: 10px;
-        padding: 28px 24px;
+        padding: 20px 18px;
         box-shadow: 0 25px 50px rgba(15,23,42,0.65);
         margin: auto;
         box-sizing: border-box;
@@ -141,16 +141,16 @@ st.markdown(
     .registration-eyebrow {
         letter-spacing: 0.6em;
         color: #38bdf8;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         text-transform: uppercase;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         margin-top: 0;
     }
     .registration-box h1 {
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         margin-top: 0;
         letter-spacing: 8px;
-        font-size: 1.4rem;
+        font-size: 1.2rem;
         text-align: left;
         color: #f8fafc;
         font-family: 'Syncopate', sans-serif;
@@ -163,31 +163,35 @@ st.markdown(
     }
     .registration-subtext {
         color:#94a3b8;
-        margin-bottom:20px;
-        font-size:0.9rem;
+        margin-bottom:14px;
+        font-size:0.8rem;
         letter-spacing:0.08em;
         text-transform:none;
-        line-height: 1.4;
+        line-height: 1.3;
     }
     .input-label {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         letter-spacing: 0.2em;
         text-transform: uppercase;
         color: #cbd5f5;
-        margin-bottom: 8px;
-        margin-top: 16px;
+        margin-bottom: 6px;
+        margin-top: 12px;
         display: block;
     }
     .input-label:first-of-type {
         margin-top: 0;
+    }
+    .registration-box .stTextInput {
+        margin-bottom: 0;
     }
     .registration-box .stTextInput>div>div>input {
         background: #0b1425;
         border: 1px solid #1f2a3d;
         border-radius: 6px;
         color: #f8fafc;
-        padding: 12px 16px;
-        font-size: 0.95rem;
+        padding: 8px 12px;
+        font-size: 0.9rem;
+        margin-bottom: 0;
     }
     .registration-box .stTextInput>div>div>input:focus {
         border-color: #38bdf8;
@@ -197,6 +201,9 @@ st.markdown(
     .registration-box .stTextInput>div>div>input::placeholder {
         color: #64748b;
     }
+    .registration-box .stForm {
+        margin-bottom: 0;
+    }
     .registration-box button, .stButton>button {
         width: 100%;
         background: linear-gradient(90deg, #2563eb, #0ea5e9) !important;
@@ -205,6 +212,9 @@ st.markdown(
         font-weight: 600;
         letter-spacing: 0.12em;
         text-transform: uppercase;
+        padding: 10px !important;
+        margin-top: 12px;
+        margin-bottom: 0;
     }
     .nav-heading {
         font-size: 0.85rem;
@@ -508,14 +518,30 @@ def _render_registration() -> None:
     [data-testid="stAppViewContainer"] {
         padding: 0 !important;
     }
+    .registration-box .stCaption {
+        font-size: 0.75rem !important;
+        margin-top: 4px !important;
+        margin-bottom: 0 !important;
+    }
+    .registration-box form {
+        margin-bottom: 0;
+    }
+    .registration-box [data-testid="stVerticalBlock"] {
+        gap: 0 !important;
+    }
+    .registration-box [data-testid="stVerticalBlock"] > div {
+        margin-bottom: 0 !important;
+    }
+    .registration-box .element-container {
+        margin-bottom: 0 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
     st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
     st.markdown("<div class='registration-eyebrow'>System Registration</div>", unsafe_allow_html=True)
     st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
     st.markdown(
-        "<p class='registration-subtext'>Secure this appliance by linking it to your SentriNode license. "
-        "Provide an administrative contact and deployment location to activate telemetry.</p>",
+        "<p class='registration-subtext'>Link this appliance to your SentriNode license. Provide admin contact and deployment location.</p>",
         unsafe_allow_html=True,
     )
     with st.form("registration-form"):
@@ -535,10 +561,10 @@ def _render_registration() -> None:
                 st.rerun()
     if st.session_state.get("registration_error"):
         st.markdown(
-            f"<div style='color: #ef4444; padding: 12px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 16px; margin-bottom: 12px;'>{st.session_state['registration_error']}</div>",
+            f"<div style='color: #ef4444; padding: 8px 10px; background: #1c0f0f; border: 1px solid #7f1d1d; border-radius: 6px; margin-top: 10px; margin-bottom: 6px; font-size: 0.8rem;'>{st.session_state['registration_error']}</div>",
             unsafe_allow_html=True
         )
-    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
     st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
     st.markdown("</div></div>", unsafe_allow_html=True)
 
