@@ -64,11 +64,11 @@ section[data-testid="stSidebar"] {
     letter-spacing: 8px;
 }
 .logo-left {
-    margin: 32px 0 12px 0;
+    margin: 16px 0 12px 0;
 }
 .logo-center {
     text-align: center;
-    margin: 48px 0 16px 0;
+    margin: 0 0 16px 0;
 }
 .logo-caption {
     text-transform: uppercase;
@@ -77,20 +77,14 @@ section[data-testid="stSidebar"] {
     color: #94a3b8;
     margin-bottom: 32px;
 }
-.onboarding-stage {
-    min-height: 100vh;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 3rem 1rem;
-}
 .onboarding-card {
     width: 100%;
-    max-width: 460px;
+    max-width: 520px;
+    margin: 0 auto 1.5rem;
     background: rgba(8, 15, 35, 0.95);
     border: 1px solid rgba(148, 163, 184, 0.25);
     border-radius: 16px;
-    padding: 32px;
+    padding: 28px 32px;
     box-shadow: 0 35px 75px rgba(0, 0, 0, 0.55);
 }
 .onboarding-card h3 {
@@ -321,7 +315,15 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _render_onboarding(serial: str) -> None:
-    st.markdown("<div class='onboarding-stage'><div class='onboarding-card'>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div class='onboarding-card'>", unsafe_allow_html=True)
     _render_logo(centered=True)
     st.markdown("<h3>System Onboarding</h3>", unsafe_allow_html=True)
     st.markdown(
@@ -344,7 +346,7 @@ def _render_onboarding(serial: str) -> None:
                 error_msg = "Unable to reach Neo4j to register this node."
     if error_msg:
         st.markdown(f"<div class='form-error'>{error_msg}</div>", unsafe_allow_html=True)
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 
