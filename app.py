@@ -34,6 +34,9 @@ st.markdown(
     header, footer, #MainMenu {visibility: hidden;}
     .main .block-container {
         padding-top: 0 !important;
+        padding-left: 3rem;
+        padding-right: 3rem;
+        padding-bottom: 3rem;
     }
     section[data-testid="stSidebar"] {
         background: #080f1c;
@@ -75,11 +78,13 @@ st.markdown(
     }
     .brand-title .brand-name,
     .sidebar-brand .brand-name {
-        letter-spacing: 0.6rem;
-        background: linear-gradient(90deg, #06b6d4, #f8fafc);
+        letter-spacing: 8px;
+        background: linear-gradient(90deg, #06b6d4, #ffffff);
         -webkit-background-clip: text;
+        background-clip: text;
         color: transparent;
         font-weight: 700;
+        text-transform: uppercase;
     }
     .brand-title .brand-divider,
     .sidebar-brand .brand-divider {
@@ -330,7 +335,7 @@ ADMIN_KEY = os.getenv("SENTRINODE_ADMIN_KEY")
 
 
 def _fetch_license_status() -> tuple[bool, str | None]:
-    """Return (connected, status) for the local license node."""
+    """Return (connected, status) for the local license node. Returns None if Hardware ID not found in Neo4j."""
     if not LICENSE_SERIAL:
         return False, None
     if ADMIN_KEY and LICENSE_SERIAL == ADMIN_KEY:
@@ -347,6 +352,7 @@ def _fetch_license_status() -> tuple[bool, str | None]:
                 serial=LICENSE_SERIAL,
             ).single()
         if not record:
+            # Hardware ID not found in Neo4j - needs registration
             return True, None
         status = str(record["status"] or "").lower() or "active"
         return True, status
@@ -465,7 +471,7 @@ def _reset_local_session() -> None:
 
 def _render_registration() -> None:
     st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
-    st.markdown("<div class='registration-eyebrow'>Provisioning</div>", unsafe_allow_html=True)
+    st.markdown("<div class='registration-eyebrow'>System Registration</div>", unsafe_allow_html=True)
     st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
     st.markdown(
         "<p class='registration-subtext'>Secure this appliance by linking it to your SentriNode license. "
@@ -513,8 +519,16 @@ def _render_account_settings(license_status: str) -> None:
     badge_color = "#22c55e"
     if status_key not in ("active", "paid"):
         badge_color = "#fbbf24" if status_key in ("trial", "pending") else "#ef4444"
+    
+    # Display Name and Company prominently
+    admin_name = (profile or {}).get("admin") or "—"
+    company = (profile or {}).get("company") or "—"
+    
+    st.markdown(f"**Name:** {admin_name}")
+    st.markdown(f"**Company:** {company}")
+    st.markdown("")
     st.markdown(
-        f"<span style='padding:6px 14px;border-radius:4px;background:{badge_color};color:#0f172a;font-weight:600;'>Status: {status.title()}</span>",
+        f"<span style='padding:6px 14px;border-radius:4px;background:{badge_color};color:#0f172a;font-weight:600;'>Status: Active</span>",
         unsafe_allow_html=True,
     )
     st.write("")
@@ -554,16 +568,14 @@ def _render_account_settings(license_status: str) -> None:
 connected_license, license_status = _fetch_license_status()
 if not connected_license:
     st.sidebar.warning("Unable to reach licensing service. Running in offline mode.")
-if license_status is None:
+# Show registration form if Hardware ID not found in Neo4j or if license is expired
+if license_status is None or license_status == "expired":
     _render_registration()
-    st.stop()
-if license_status == "expired":
-    _render_disabled()
     st.stop()
 
 st.sidebar.markdown("<div class='nav-heading'>Console</div>", unsafe_allow_html=True)
-view = st.sidebar.radio("Console", ("Dashboard", "Account Settings"), index=0, label_visibility="collapsed")
-if view == "Account Settings":
+view = st.sidebar.radio("Console", ("📊 Real-Time Metrics", "👤 Account Settings"), index=0, label_visibility="collapsed")
+if view == "👤 Account Settings":
     _render_account_settings(license_status or "active")
     st.stop()
 

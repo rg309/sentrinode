@@ -11,9 +11,14 @@ if ! command -v docker compose >/dev/null 2>&1 && ! command -v docker-compose >/
   exit 1
 fi
 
-ROOT_DIR="sentrinode"
+# Determine root directory - use current directory if not in sentrinode subdirectory
+if [ -f "app.py" ] && [ -f "docker-compose.yml" ]; then
+  ROOT_DIR="."
+else
+  ROOT_DIR="sentrinode"
+  mkdir -p "$ROOT_DIR"
+fi
 ENV_FILE="$ROOT_DIR/.env"
-mkdir -p "$ROOT_DIR"
 
 API_KEY="${1:-}"
 
@@ -43,9 +48,18 @@ else
     exit 1
   fi
 
+  # Get Mac Serial Number
   SERIAL_NUMBER="$(system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '/Serial Number/{print $2; exit}')"
   if [ -z "$SERIAL_NUMBER" ]; then
+    # Fallback: try ioreg method
+    SERIAL_NUMBER="$(ioreg -l | grep IOPlatformSerialNumber | awk -F'"' '{print $4}' 2>/dev/null)"
+  fi
+  if [ -z "$SERIAL_NUMBER" ]; then
+    # Last resort: generate UUID
     SERIAL_NUMBER="$(uuidgen)"
+    echo "Warning: Could not detect Mac Serial Number, using generated UUID: $SERIAL_NUMBER" >&2
+  else
+    echo "Detected Mac Serial Number: $SERIAL_NUMBER"
   fi
 
   NEO4J_USER=${NEO4J_USER:-neo4j}
@@ -91,7 +105,10 @@ JSON
     echo "Existing license detected with status: $current_status"
   fi
 
+  # Save environment variables to .env file
   cat > "$ENV_FILE" <<EOF
+# SentriNode Configuration
+# Hardware ID (Mac Serial Number) used as NEO4J_PASSWORD for license tracking
 NEO4J_URI=$INPUT_URI
 NEO4J_HTTP=$NEO4J_HTTP
 NEO4J_USER=$NEO4J_USER
@@ -99,6 +116,7 @@ NEO4J_PASSWORD=$SERIAL_NUMBER
 LICENSE_SERIAL=$SERIAL_NUMBER
 EOF
   chmod 600 "$ENV_FILE"
+  echo "Configuration saved to $ENV_FILE"
   export NEO4J_URI="$INPUT_URI"
   export NEO4J_HTTP="$NEO4J_HTTP"
   export NEO4J_PASSWORD="$SERIAL_NUMBER"
