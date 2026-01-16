@@ -6,13 +6,28 @@ import streamlit as st
 st.set_page_config(page_title="SENTRINODE", layout="wide")
 st.markdown(
     """
-    <style>
-    /* This targets the search/toolbar container specifically */
+<style>
+    /* 1. COMPLETELY REMOVE THE TOP TOOLBAR BOX */
     [data-testid="stHeader"] {
         display: none !important;
+        height: 0px !important;
     }
-    /* This removes the anchor/link padding usually found at the top */ .main .block-container { padding-top: 1rem !important; }
-    </style>
+
+    /* 2. KILL THE REMAINING GAP AT THE TOP */
+    .stApp {
+        margin-top: -60px !important;
+    }
+
+    /* 3. ENSURE CONTENT SITS AT THE ABSOLUTE TOP */
+    .main .block-container {
+        padding-top: 0rem !important;
+        margin-top: 0rem !important;
+    }
+
+    /* 4. HIDE THE HAMBURGER MENU AND FOOTER */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
     """,
     unsafe_allow_html=True,
 )
