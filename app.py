@@ -47,33 +47,17 @@ st.markdown(
         letter-spacing: 0.08em;
         color: #cbd5f5;
     }
-    .login-wrapper {
-        min-height: 90vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .login-box {
-        width: 100%;
-        max-width: 420px;
-        background-color: #111a2c;
-        border: 1px solid #1f2a3d;
-        border-radius: 6px;
-        padding: 36px 32px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-    }
-    .login-box h1 {
-        margin-bottom: 24px;
-        letter-spacing: 0.3em;
-        font-size: 1.1rem;
+    .login-logo {
         text-align: center;
+        margin-bottom: 24px;
+        letter-spacing: 0.35em;
+        font-size: 1.1rem;
         color: #f8fafc;
     }
-    .login-box button {
-        width: 100%;
+    .stButton>button {
         background-color: #1d4ed8 !important;
         color: #f8fafc !important;
-        border: none;
+        border: 1px solid #1d4ed8;
     }
     </style>
     """,
@@ -187,21 +171,20 @@ def _authenticate(license_key: str, password: str) -> bool:
 
 
 def _render_login() -> None:
-    placeholder = st.empty()
-    with placeholder.container():
-        st.markdown('<div class="login-wrapper"><div class="login-box">', unsafe_allow_html=True)
-        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        with st.form("sentrinode-login"):
-            license_key = st.text_input("License Key", value="", key="license-input")
-            password = st.text_input("Password", value="", type="password", key="password-input")
-            submitted = st.form_submit_button("Sign In", use_container_width=True)
-            if submitted:
-                if _authenticate(license_key, password):
-                    st.session_state["logged_in"] = True
-                    st.experimental_rerun()
-                else:
-                    st.error("Access denied. Check your license and password.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:12vh;'></div>", unsafe_allow_html=True)
+    _, center_col, _ = st.columns([3, 2, 3])
+    with center_col:
+        st.markdown("<div class='login-logo'>SENTRINODE</div>", unsafe_allow_html=True)
+        st.markdown("<div style='color:#94a3b8; text-align:center; margin-bottom:18px;'>Causal Intelligence Console</div>", unsafe_allow_html=True)
+        license_key = st.text_input("License Key", value="", key="license-input")
+        password = st.text_input("Password", value="", type="password", key="password-input")
+        sign_in = st.button("Sign In", use_container_width=True)
+        if sign_in:
+            if _authenticate(license_key, password):
+                st.session_state["logged_in"] = True
+                st.experimental_rerun()
+            else:
+                st.error("Access denied. Check your license and password.")
 
 
 if not st.session_state["logged_in"]:
