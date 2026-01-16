@@ -102,42 +102,70 @@ st.markdown(
         width: 100%;
     }
     .registration-wrapper {
-        min-height: calc(100vh - 40px);
+        min-height: calc(100vh - 60px);
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: center;
-        padding-top: 40px;
+        padding: 60px 20px;
+        background: radial-gradient(circle at top, rgba(14,165,233,0.08), transparent 60%);
     }
     .registration-box {
         width: 100%;
-        max-width: 420px;
+        max-width: 480px;
         background-color: #111a2c;
         border: 1px solid #1f2a3d;
-        border-radius: 6px;
-        padding: 36px 32px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+        border-radius: 10px;
+        padding: 40px 36px;
+        box-shadow: 0 25px 50px rgba(15,23,42,0.65);
+    }
+    .registration-eyebrow {
+        letter-spacing: 0.6em;
+        color: #38bdf8;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        margin-bottom: 12px;
     }
     .registration-box h1 {
-        margin-bottom: 24px;
-        letter-spacing: 0.45em;
-        font-size: 1.1rem;
-        text-align: center;
+        margin-bottom: 12px;
+        letter-spacing: 0.5em;
+        font-size: 1.2rem;
+        text-align: left;
         color: #f8fafc;
         font-family: 'Syncopate', sans-serif;
     }
     .registration-subtext {
         color:#94a3b8;
-        text-align:center;
-        margin-bottom:18px;
-        font-size:0.9rem;
-        letter-spacing:0.1em;
-        text-transform:uppercase;
+        margin-bottom:24px;
+        font-size:0.95rem;
+        letter-spacing:0.08em;
+        text-transform:none;
+        line-height: 1.4;
+    }
+    .input-label {
+        font-size: 0.8rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #cbd5f5;
+        margin-bottom: 6px;
+        display: block;
+    }
+    .registration-box .stTextInput>div>div>input {
+        background: #0b1425;
+        border: 1px solid #1f2a3d;
+        border-radius: 6px;
+        color: #f8fafc;
+    }
+    .registration-box .stTextInput>div>div>input:focus {
+        border-color: #38bdf8;
     }
     .registration-box button, .stButton>button {
         width: 100%;
-        background-color: #1d4ed8 !important;
+        background: linear-gradient(90deg, #2563eb, #0ea5e9) !important;
         color: #f8fafc !important;
         border: none;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
     }
     .nav-heading {
         font-size: 0.85rem;
@@ -436,25 +464,29 @@ def _reset_local_session() -> None:
 
 
 def _render_registration() -> None:
-    st.markdown('<div class="registration-wrapper">', unsafe_allow_html=True)
-    _, center_col, _ = st.columns([1.2, 0.8, 1.2])
-    with center_col:
-        st.markdown('<div class="registration-box">', unsafe_allow_html=True)
-        st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
-        st.markdown("<div class='registration-subtext'>Node Registration</div>", unsafe_allow_html=True)
-        with st.form("registration-form"):
-            admin_name = st.text_input("Admin Name", value="")
-            company = st.text_input("Company / Location", value="")
-            submitted = st.form_submit_button("Register Node", use_container_width=True)
-            if submitted:
-                if _register_license(admin_name, company):
-                    st.session_state["registration_error"] = ""
-                    st.success("Node registered. Loading console...")
-                    st.rerun()
-        if st.session_state.get("registration_error"):
-            st.error(st.session_state["registration_error"])
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="registration-wrapper"><div class="registration-box">', unsafe_allow_html=True)
+    st.markdown("<div class='registration-eyebrow'>Provisioning</div>", unsafe_allow_html=True)
+    st.markdown("<h1>SENTRINODE</h1>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='registration-subtext'>Secure this appliance by linking it to your SentriNode license. "
+        "Provide an administrative contact and deployment location to activate telemetry.</p>",
+        unsafe_allow_html=True,
+    )
+    with st.form("registration-form"):
+        st.markdown("<label class='input-label'>Admin Name</label>", unsafe_allow_html=True)
+        admin_name = st.text_input("Admin Name", value="", label_visibility="collapsed")
+        st.markdown("<label class='input-label'>Company / Location</label>", unsafe_allow_html=True)
+        company = st.text_input("Company / Location", value="", label_visibility="collapsed")
+        submitted = st.form_submit_button("Register Node", use_container_width=True)
+        if submitted:
+            if _register_license(admin_name, company):
+                st.session_state["registration_error"] = ""
+                st.success("Node registered. Loading console...")
+                st.rerun()
+    if st.session_state.get("registration_error"):
+        st.error(st.session_state["registration_error"])
+    st.caption("Need assistance? Contact ops@sentrinode.io for enterprise provisioning.")
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 def _render_disabled() -> None:
