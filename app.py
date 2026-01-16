@@ -46,7 +46,7 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687").strip().rstrip("/")
+NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://neo4j:7687").strip().rstrip("/")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 LICENSE_SERIAL = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
