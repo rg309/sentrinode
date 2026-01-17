@@ -73,77 +73,108 @@ def is_strong_password(pw: str) -> tuple[bool, str]:
     return True, ""
 
 
-def signup_ui(supabase: Client) -> None:
-    st.subheader("Create account")
-
-    email = st.text_input("Email", key="su_email")
-    pw1 = st.text_input("Password", type="password", key="su_pw1")
-    pw2 = st.text_input("Re-enter password", type="password", key="su_pw2")
-    accept = st.checkbox(
-        "I understand this account will be created with Supabase Auth.", key="su_accept"
-    )
-
-    if st.button("Create account", key="su_btn"):
-        if not accept:
-            st.error("Please check the box to continue.")
-            return
-        if not email or "@" not in email:
-            st.error("Enter a valid email.")
-            return
-        if pw1 != pw2:
-            st.error("Passwords do not match.")
-            return
-
-        ok, msg = is_strong_password(pw1)
-        if not ok:
-            st.error(msg)
-            return
-
-        try:
-            res = supabase.auth.sign_up({"email": email, "password": pw1})
-            if getattr(res, "session", None):
-                st.session_state["user"] = res.user
-                st.session_state["access_token"] = res.session.access_token
-                st.session_state.username = email.strip()
-                st.session_state.logged_in = True
-                st.success("Account created and signed in.")
-                st.rerun()
-            else:
-                st.success("Account created. Check your email to confirm, then sign in.")
-        except Exception as exc:
-            st.error(f"Sign up failed: {exc}")
+def _resolve_user_role(username: str) -> str:
+    role = st.session_state.get("user_role", "user")
+    driver = _neo4j_driver()
+    if not driver:
+        return role
+    try:
+        with driver.session() as session:
+            record = session.run(
+                "MATCH (u:User {username:$username}) RETURN coalesce(u.role,'user') AS role LIMIT 1",
+                username=username,
+            ).single()
+        if record and record["role"]:
+            role = record["role"]
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        pass
+    finally:
+        driver.close()
+    return role
 
 
-def login_ui(supabase: Client) -> None:
-    st.subheader("Login")
-    email = st.text_input("Email", key="li_email")
-    pw = st.text_input("Password", type="password", key="li_pw")
-
-    if st.button("Login", key="li_btn"):
-        try:
-            res = supabase.auth.sign_in_with_password({"email": email, "password": pw})
-            st.session_state["user"] = res.user
-            st.session_state["access_token"] = res.session.access_token
-            st.session_state.username = email.strip()
-            st.session_state.logged_in = True
-            st.success("Signed in.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"Login failed: {exc}")
-
-
-def render_auth_screen() -> None:
+def show_login() -> None:
+    render_hero("SENTRINODE")
+    st.title("SentriNode Login")
     client = _supabase_client()
     if not client:
         st.error("Supabase credentials missing.")
         st.stop()
+    with st.form("login_form"):
+        email = st.text_input("Email", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        submitted = st.form_submit_button("Login")
+    if submitted:
+        with st.spinner("Syncing with SentriNode Network..."):
+            try:
+                res = client.auth.sign_in_with_password({"email": email, "password": password})
+            except Exception as exc:  # pragma: no cover - network
+                res = None
+                st.error(f"Login failed: {exc}")
+        if res and res.user and res.session:
+            st.session_state["user"] = res.user
+            st.session_state["access_token"] = res.session.access_token
+            st.session_state.username = (email or "").strip()
+            st.session_state.logged_in = True
+            st.session_state.user_role = _resolve_user_role(st.session_state.username)
+            st.session_state.show_signup = False
+            st.toast("Console unlocked. Welcome back.", icon="✅")
+            st.rerun()
+        else:
+            st.error("Login failed.")
+    if st.button("Create an account"):
+        st.session_state.show_signup = True
+        st.rerun()
+    st.stop()
+
+
+def show_signup() -> None:
     render_hero("SENTRINODE")
-    st.title("SentriNode Console Access")
-    tab_login, tab_signup = st.tabs(["Login", "Create account"])
-    with tab_login:
-        login_ui(client)
-    with tab_signup:
-        signup_ui(client)
+    st.title("Create SentriNode Account")
+    client = _supabase_client()
+    if not client:
+        st.error("Supabase credentials missing.")
+        st.stop()
+    email = st.text_input("Email", key="su_email")
+    pw1 = st.text_input("Password", type="password", key="su_pw1")
+    pw2 = st.text_input("Re-enter Password", type="password", key="su_pw2")
+    accept = st.checkbox(
+        "I understand this account will be created with Supabase Auth.", key="su_accept"
+    )
+    if st.button("Register Node", key="su_btn"):
+        if not accept:
+            st.error("Please check the box to continue.")
+        elif not email or "@" not in email:
+            st.error("Enter a valid email.")
+        elif pw1 != pw2:
+            st.error("Passwords do not match.")
+        else:
+            ok, msg = is_strong_password(pw1)
+            if not ok:
+                st.error(msg)
+            else:
+                with st.spinner("Syncing with SentriNode Network..."):
+                    try:
+                        res = client.auth.sign_up({"email": email, "password": pw1})
+                    except Exception as exc:  # pragma: no cover - network
+                        res = None
+                        st.error(f"Sign up failed: {exc}")
+                if res:
+                    if getattr(res, "session", None):
+                        st.session_state["user"] = res.user
+                        st.session_state["access_token"] = res.session.access_token
+                        st.session_state.username = email.strip()
+                        st.session_state.logged_in = True
+                        st.session_state.user_role = _resolve_user_role(st.session_state.username)
+                        st.toast("Account created and signed in.", icon="🎉")
+                        st.rerun()
+                    else:
+                        st.success("Account created. Check your email to confirm, then sign in.")
+                        st.session_state.show_signup = False
+                        st.rerun()
+    if st.button("Back to Login"):
+        st.session_state.show_signup = False
+        st.rerun()
     st.stop()
 
 
@@ -520,7 +551,10 @@ def show_settings():
 
 # --- MAIN NAVIGATION ---
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
-    render_auth_screen()
+    if st.session_state.show_signup:
+        show_signup()
+    else:
+        show_login()
 else:
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
