@@ -46,13 +46,17 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://sentrinode.railway.internal:7687").strip().rstrip("/")
+NEO4J_URI = "bolt://sentrinode.railway.internal:7687"
 NEO4J_USER = os.getenv("NEO4J_USER") or ""
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD") or ""
 HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
 
 
 def _report_neo4j_issue(kind: str, detail: str) -> None:
+    if kind == "Internal Handshake Failed":
+        st.error(kind)
+        print(f"{kind}: {detail}")
+        return
     message = f"Neo4j connection failed ({kind}). {detail}"
     st.error(message)
     print(message)
@@ -252,7 +256,7 @@ def _neo4j_driver():
     try:
         driver.verify_connectivity()
     except ServiceUnavailable as exc:
-        _report_neo4j_issue("Connection Refused", str(exc))
+        _report_neo4j_issue("Internal Handshake Failed", str(exc))
         driver.close()
         raise
     except AuthError as exc:
