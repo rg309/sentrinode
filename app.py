@@ -181,14 +181,50 @@ def show_login():
 def show_signup():
     st.title("Create SentriNode Account")
     with st.form("signup_form"):
-        st.text_input("Email")
-        st.text_input("New Username")
-        st.text_input("New Password", type="password")
+        email = st.text_input("Email")
+        username = st.text_input("New Username")
+        password = st.text_input("New Password", type="password")
         if st.form_submit_button("Register Node"):
-            # We will add DB save here later
-            st.success("Account created! Please log in.")
-            st.session_state.show_signup = False
-            st.rerun()
+            user = (username or "").strip()
+            email = (email or "").strip()
+            if not user or not password or not email:
+                st.error("All fields are required.")
+            else:
+                driver = _neo4j_driver()
+                if not driver:
+                    st.error("Unable to connect to SentriNode network.")
+                else:
+                    with st.spinner("Syncing with SentriNode Network..."):
+                        try:
+                            with driver.session() as session:
+                                existing = session.run(
+                                    "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
+                                    user=user,
+                                ).single()
+                                if existing:
+                                    st.error("Username already taken.")
+                                else:
+                                    session.run(
+                                        """
+                                        CREATE (u:User {
+                                            username:$user,
+                                            email:$email,
+                                            password:$password,
+                                            role:'user',
+                                            created_at:timestamp()
+                                        })
+                                        """,
+                                        user=user,
+                                        email=email,
+                                        password=password,
+                                    )
+                                    st.success("Account created! Please log in.")
+                                    st.session_state.show_signup = False
+                                    st.rerun()
+                        except (ServiceUnavailable, Neo4jError, ValueError):
+                            st.error("Unable to save account. Try again shortly.")
+                        finally:
+                            driver.close()
     if st.button("Back to Login"):
         st.session_state.show_signup = False
         st.rerun()
