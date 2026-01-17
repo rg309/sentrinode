@@ -230,10 +230,11 @@ def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
 
 
 def _neo4j_driver():
-    if not NEO4J_PASSWORD:
-        st.info("System initializing...")
+    try:
+        return GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH, resolver=lambda addr: [addr])
+    except Exception:
+        st.error("System Initializing - Please try again in 30 seconds.")
         st.stop()
-    return GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH, resolver=lambda addr: [addr])
 
 
 @st.cache_data(ttl=25)
