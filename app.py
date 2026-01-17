@@ -163,14 +163,13 @@ def show_login():
         username = st.text_input("Username", key="login_user")
         password = st.text_input("Password", type="password", key="login_pass")
         if st.form_submit_button("Login"):
+            st.session_state.username = st.session_state.login_user.strip()
             with st.spinner("Syncing with SentriNode Network..."):
-                success, role = authenticate_user(username, password)
+                success, role = authenticate_user(st.session_state.username, password)
             if success:
                 st.session_state.logged_in = True
                 st.session_state.user_role = role or "user"
-                st.session_state.username = username.strip()
                 st.toast("Console unlocked. Welcome back.", icon="✅")
-                st.rerun()
                 st.rerun()
             else:
                 st.error("Invalid credentials or unable to verify role.")
@@ -446,7 +445,7 @@ def show_settings():
 
 
 # --- MAIN NAVIGATION ---
-if not st.session_state.logged_in:
+if not st.session_state.logged_in or not st.session_state.username:
     if st.session_state.show_signup:
         show_signup()
     else:
