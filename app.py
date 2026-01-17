@@ -1,5 +1,14 @@
-import streamlit as st
+import os
+
 import pandas as pd
+import streamlit as st
+from neo4j import GraphDatabase
+from neo4j.exceptions import Neo4jError, ServiceUnavailable
+
+try:
+    from streamlit_agraph import agraph, Config, Edge, Node
+except Exception:  # pragma: no cover - optional dependency
+    agraph = Config = Edge = Node = None
 
 st.set_page_config(layout="wide")
 
@@ -9,6 +18,18 @@ if "logged_in" not in st.session_state:
 if "show_signup" not in st.session_state:
     st.session_state.show_signup = False
 
+
+def _neo4j_driver():
+    try:
+        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        user = os.getenv("NEO4J_USER", "neo4j")
+        pwd = os.getenv("NEO4J_PASSWORD")
+        if not pwd:
+            return None
+        return GraphDatabase.driver(uri, auth=(user, pwd))
+    except Exception as exc:
+        st.warning(f"Neo4j connect failed: {exc}")
+        return None
 
 
 HERO_STYLE = """
@@ -75,10 +96,55 @@ def show_signup():
 
 def show_dashboard():
     render_hero("SentriNode Operational Command")
-    metric_cols = st.columns(3)
-    metric_cols[0].metric("Active Nodes", "1,240", "+12%")
-    metric_cols[1].metric("Network Latency", "24ms", "-2ms")
-    metric_cols[2].metric("Uptime", "99.9%", "Stable")
+    nodes_count = 0
+    rels_count = 0
+    graph_nodes: list[Node] = []
+    graph_edges: list[Edge] = []
+    driver = _neo4j_driver()
+    if driver:
+        try:
+            with driver.session() as session:
+                nodes_record = session.run("MATCH (n) RETURN count(n)").single()
+                rels_record = session.run("MATCH ()-->() RETURN count(*)").single()
+                nodes_count = nodes_record[0] if nodes_record else 0
+                rels_count = rels_record[0] if rels_record else 0
+
+                if agraph and Node and Edge and Config:
+                    node_map: dict[int, Node] = {}
+                    edges: list[Edge] = []
+                    records = session.run("MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 15")
+                    for record in records:
+                        n_start = record["n"]
+                        rel = record["r"]
+                        n_end = record["m"]
+                        for point in (n_start, n_end):
+                            if point.id not in node_map:
+                                label = point.get("name") or point.get("id") or f"node-{point.id}"
+                                node_map[point.id] = Node(
+                                    id=str(point.id),
+                                    label=str(label),
+                                    size=18,
+                                    color="#38bdf8",
+                                )
+                        edges.append(
+                            Edge(
+                                source=str(n_start.id),
+                                target=str(n_end.id),
+                                title=rel.type,
+                                color="#22d3ee",
+                            )
+                        )
+                    graph_nodes = list(node_map.values())
+                    graph_edges = edges
+        except (ServiceUnavailable, Neo4jError, ValueError):
+            pass
+        finally:
+            driver.close()
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Active Nodes", f"{nodes_count:,}", delta="+5")
+    col2.metric("Total Connections", f"{rels_count:,}")
+    col3.metric("System Health", "Optimal")
 
     left, right = st.columns([2, 1])
     with left:
@@ -90,7 +156,13 @@ def show_dashboard():
                 "edge": [510, 515, 520, 525, 530],
             }
         )
-        st.area_chart(chart_data, height=340, use_container_width=True)
+        st.area_chart(chart_data, height=240, use_container_width=True)
+        st.subheader("Node Network Map")
+        if graph_nodes and graph_edges and agraph and Config:
+            config = Config(width=900, height=360, directed=True, physics=True, hierarchical=False)
+            agraph(nodes=graph_nodes, edges=graph_edges, config=config)
+        else:
+            st.info("Graph data unavailable. Configure Neo4j to view live topology.")
     with right:
         st.subheader("Recent Alerts")
         with st.expander("Security Feed", expanded=True):
