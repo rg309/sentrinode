@@ -337,7 +337,7 @@ def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
         driver.close()
 
 
-def _sidebar_filters(container: st.container | None = None) -> FilterContext:
+def _sidebar_filters(container=None) -> FilterContext:
     container = container or st.sidebar
     with container:
         st.subheader("Global Filters")
