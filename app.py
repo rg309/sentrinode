@@ -46,10 +46,7 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-# Simple internal connection
-NEO4J_URI = "bolt://sentrinode.railway.internal:7687"
-NEO4J_AUTH = (os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD"))
-NEO4J_USER, NEO4J_PASSWORD = NEO4J_AUTH
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 HARDWARE_ID = (NEO4J_PASSWORD or "")  # Requirement: gate checks against the Neo4j password value
 
 
@@ -231,7 +228,22 @@ def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
 
 def _neo4j_driver():
     try:
-        return GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH, resolver=lambda addr: [addr])
+        # Using the direct private domain to bypass DNS issues
+        # This is the 'Handshake' fix
+        private_host = "sentrinode.railway.internal"
+        uri = f"bolt://{private_host}:7687"
+
+        # Force the driver to use the specific Railway resolver
+        def railway_resolver(address):
+            return [address]
+
+        driver = GraphDatabase.driver(
+            uri,
+            auth=(os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD")),
+            resolver=railway_resolver,
+            encrypted=False  # Critical: Internal networking must not use SSL
+        )
+        return driver
     except Exception:
         st.error("System Initializing - Please try again in 30 seconds.")
         st.stop()
