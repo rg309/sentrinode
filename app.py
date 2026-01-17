@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -17,6 +18,10 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "show_signup" not in st.session_state:
     st.session_state.show_signup = False
+if "user_role" not in st.session_state:
+    st.session_state.user_role = "user"
+if "username" not in st.session_state:
+    st.session_state.username = ""
 
 
 def _neo4j_driver():
@@ -30,6 +35,63 @@ def _neo4j_driver():
     except Exception as exc:
         st.warning(f"Neo4j connect failed: {exc}")
         return None
+
+
+def authenticate_user(username: str, password: str) -> tuple[bool, str | None]:
+    username = (username or "").strip()
+    password = password or ""
+    if not username or not password:
+        return False, None
+    driver = _neo4j_driver()
+    if not driver:
+        return False, None
+    try:
+        with driver.session() as session:
+            record = session.run(
+                """
+                MATCH (u:User {username:$username})
+                WHERE coalesce(u.password, '') = $password
+                RETURN coalesce(u.role, 'user') AS role
+                """,
+                username=username,
+                password=password,
+            ).single()
+        if record:
+            return True, record["role"]
+        return False, None
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False, None
+    finally:
+        driver.close()
+
+
+def fetch_user_nodes(username: str) -> list[dict[str, object]]:
+    username = (username or "").strip()
+    if not username:
+        return []
+    driver = _neo4j_driver()
+    if not driver:
+        return []
+    try:
+        with driver.session() as session:
+            records = session.run(
+                """
+                MATCH (u:User {username:$username})-[:OWNS|MONITORS]->(n)
+                RETURN coalesce(n.name, n.id) AS node,
+                       coalesce(n.status, 'online') AS status,
+                       coalesce(n.latency_ms, 0) AS latency
+                LIMIT 15
+                """,
+                username=username,
+            )
+        return [
+            {"Node": record["node"], "Status": record["status"], "Latency (ms)": record["latency"]}
+            for record in records
+        ]
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return []
+    finally:
+        driver.close()
 
 
 HERO_STYLE = """
@@ -67,12 +129,19 @@ def show_login():
     render_hero("SENTRINODE")
     st.title("SentriNode Login")
     with st.form("login_form"):
-        st.text_input("Username")
-        st.text_input("Password", type="password")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
         if st.form_submit_button("Login"):
-            # We will add DB check here later
-            st.session_state.logged_in = True
-            st.rerun()
+            with st.spinner("Syncing with SentriNode Network..."):
+                success, role = authenticate_user(username, password)
+            if success:
+                st.session_state.logged_in = True
+                st.session_state.user_role = role or "user"
+                st.session_state.username = username.strip()
+                st.toast("Console unlocked. Welcome back.", icon="✅")
+                st.rerun()
+            else:
+                st.error("Invalid credentials or unable to verify role.")
     if st.button("Create an account"):
         st.session_state.show_signup = True
         st.rerun()
@@ -94,48 +163,48 @@ def show_signup():
         st.rerun()
 
 
-def show_dashboard():
-    render_hero("SentriNode Operational Command")
+def render_admin_dashboard() -> None:
     nodes_count = 0
     rels_count = 0
-    graph_nodes: list[Node] = []
-    graph_edges: list[Edge] = []
+    graph_nodes: list = []
+    graph_edges: list = []
     driver = _neo4j_driver()
     if driver:
         try:
-            with driver.session() as session:
-                nodes_record = session.run("MATCH (n) RETURN count(n)").single()
-                rels_record = session.run("MATCH ()-->() RETURN count(*)").single()
-                nodes_count = nodes_record[0] if nodes_record else 0
-                rels_count = rels_record[0] if rels_record else 0
+            with st.spinner("Syncing with SentriNode Network..."):
+                with driver.session() as session:
+                    nodes_record = session.run("MATCH (n) RETURN count(n)").single()
+                    rels_record = session.run("MATCH ()-->() RETURN count(*)").single()
+                    nodes_count = nodes_record[0] if nodes_record else 0
+                    rels_count = rels_record[0] if rels_record else 0
 
-                if agraph and Node and Edge and Config:
-                    node_map: dict[int, Node] = {}
-                    edges: list[Edge] = []
-                    records = session.run("MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 15")
-                    for record in records:
-                        n_start = record["n"]
-                        rel = record["r"]
-                        n_end = record["m"]
-                        for point in (n_start, n_end):
-                            if point.id not in node_map:
-                                label = point.get("name") or point.get("id") or f"node-{point.id}"
-                                node_map[point.id] = Node(
-                                    id=str(point.id),
-                                    label=str(label),
-                                    size=18,
-                                    color="#38bdf8",
+                    if agraph and Node and Edge and Config:
+                        node_map: dict[int, Node] = {}
+                        edges: list[Edge] = []
+                        records = session.run("MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 15")
+                        for record in records:
+                            n_start = record["n"]
+                            rel = record["r"]
+                            n_end = record["m"]
+                            for point in (n_start, n_end):
+                                if point.id not in node_map:
+                                    label = point.get("name") or point.get("id") or f"node-{point.id}"
+                                    node_map[point.id] = Node(
+                                        id=str(point.id),
+                                        label=str(label),
+                                        size=18,
+                                        color="#38bdf8",
+                                    )
+                            edges.append(
+                                Edge(
+                                    source=str(n_start.id),
+                                    target=str(n_end.id),
+                                    title=rel.type,
+                                    color="#22d3ee",
                                 )
-                        edges.append(
-                            Edge(
-                                source=str(n_start.id),
-                                target=str(n_end.id),
-                                title=rel.type,
-                                color="#22d3ee",
                             )
-                        )
-                    graph_nodes = list(node_map.values())
-                    graph_edges = edges
+                        graph_nodes = list(node_map.values())
+                        graph_edges = edges
         except (ServiceUnavailable, Neo4jError, ValueError):
             pass
         finally:
@@ -159,8 +228,9 @@ def show_dashboard():
         st.area_chart(chart_data, height=240, use_container_width=True)
         st.subheader("Node Network Map")
         if graph_nodes and graph_edges and agraph and Config:
-            config = Config(width=900, height=360, directed=True, physics=True, hierarchical=False)
-            agraph(nodes=graph_nodes, edges=graph_edges, config=config)
+            with st.spinner("Syncing with SentriNode Network..."):
+                config = Config(width=900, height=360, directed=True, physics=True, hierarchical=False)
+                agraph(nodes=graph_nodes, edges=graph_edges, config=config)
         else:
             st.info("Graph data unavailable. Configure Neo4j to view live topology.")
     with right:
@@ -176,6 +246,153 @@ def show_dashboard():
                 st.write(f"• {alert}")
 
 
+def render_user_dashboard(username: str) -> None:
+    st.caption("Personal Node Status")
+    with st.spinner("Syncing with SentriNode Network..."):
+        nodes = fetch_user_nodes(username)
+    summary_cols = st.columns(2)
+    summary_cols[0].metric("Assigned Nodes", len(nodes))
+    offline = sum(1 for node in nodes if str(node["Status"]).lower() not in ("online", "healthy"))
+    summary_cols[1].metric("Alerts", offline)
+    if nodes:
+        st.table(pd.DataFrame(nodes))
+    else:
+        st.info("No assigned nodes yet. Provision a node to begin monitoring.")
+
+
+def show_dashboard():
+    role = st.session_state.get("user_role", "user")
+    username = st.session_state.get("username", "operator")
+    if role == "admin":
+        render_hero("SentriNode Operational Command")
+        render_admin_dashboard()
+    else:
+        render_hero("SentriNode Node Status")
+        render_user_dashboard(username)
+    st.caption(f"Last synced: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+
+# --- SETTINGS LOGIC ---
+def _update_user_profile(username: str, full_name: str, email: str) -> bool:
+    driver = _neo4j_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (u:User {username:$username})
+                SET u.full_name = $full_name,
+                    u.notification_email = $email
+                """,
+                username=username,
+                full_name=full_name.strip(),
+                email=email.strip(),
+            )
+        return True
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False
+    finally:
+        driver.close()
+
+
+def _update_user_preferences(username: str, theme: str, desktop_notifications: bool) -> bool:
+    driver = _neo4j_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (u:User {username:$username})
+                SET u.system_theme = $theme,
+                    u.desktop_notifications = $notify
+                """,
+                username=username,
+                theme=theme,
+                notify=desktop_notifications,
+            )
+        return True
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False
+    finally:
+        driver.close()
+
+
+def _change_password(username: str, old_password: str, new_password: str) -> bool:
+    driver = _neo4j_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as session:
+            record = session.run(
+                """
+                MATCH (u:User {username:$username})
+                WHERE coalesce(u.password, '') = $old
+                SET u.password = $new
+                RETURN u.username AS username
+                """,
+                username=username,
+                old=old_password,
+                new=new_password,
+            ).single()
+        return bool(record)
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return False
+    finally:
+        driver.close()
+
+
+def show_settings():
+    username = st.session_state.get("username") or ""
+    st.header("Account Settings")
+    with st.form("profile_form"):
+        full_name = st.text_input("Full Name")
+        email = st.text_input("Notification Email")
+        submitted = st.form_submit_button("Save Profile")
+        if submitted:
+            with st.spinner("Syncing with SentriNode Network..."):
+                ok = _update_user_profile(username, full_name, email)
+            if ok:
+                st.success("Profile updated.")
+                st.toast("Profile saved.", icon="✅")
+            else:
+                st.error("Unable to update profile.")
+
+    st.divider()
+    st.subheader("Preferences")
+    themes = ["Auto", "Night Ops", "Day Ops"]
+    theme = st.selectbox("System Theme", themes)
+    desktop_notifications = st.checkbox("Enable Desktop Notifications")
+    if st.button("Save Preferences"):
+        with st.spinner("Syncing with SentriNode Network..."):
+            ok = _update_user_preferences(username, theme, desktop_notifications)
+        if ok:
+            st.success("Preferences saved.")
+            st.toast("Preferences updated.", icon="⚙️")
+        else:
+            st.error("Unable to save preferences.")
+
+    st.divider()
+    st.subheader("Security")
+    with st.form("password_form"):
+        old_password = st.text_input("Current Password", type="password")
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm New Password", type="password")
+        change = st.form_submit_button("Change Password")
+        if change:
+            if not new_password or new_password != confirm_password:
+                st.error("Passwords do not match.")
+            else:
+                with st.spinner("Syncing with SentriNode Network..."):
+                    ok = _change_password(username, old_password, new_password)
+                if ok:
+                    st.success("Password updated.")
+                    st.toast("Credentials rotated.", icon="🔐")
+                else:
+                    st.error("Unable to update password. Check your current password.")
+
+
 # --- MAIN NAVIGATION ---
 if not st.session_state.logged_in:
     if st.session_state.show_signup:
@@ -183,10 +400,14 @@ if not st.session_state.logged_in:
     else:
         show_login()
 else:
-    show_dashboard()
-    with st.sidebar:
-        st.title("Console")
-        st.caption("Session Controls")
-        if st.button("Logout"):
-            st.session_state.logged_in = False
-            st.rerun()
+    sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Settings"))
+    st.sidebar.caption("Session Controls")
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.user_role = "user"
+        st.session_state.username = ""
+        st.rerun()
+    if sidebar_option == "Dashboard":
+        show_dashboard()
+    else:
+        show_settings()
