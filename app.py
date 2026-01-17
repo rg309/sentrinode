@@ -38,7 +38,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from neo4j import GraphDatabase
-from neo4j.exceptions import AuthError, Neo4jError, ServiceUnavailable
+from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 try:  # Optional service graph rendering
     from streamlit_agraph import agraph, Config, Edge, Node
@@ -46,20 +46,11 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-NEO4J_URI = "bolt://sentrinode.railway.internal:7687"
-NEO4J_USER = os.getenv("NEO4J_USER") or ""
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD") or ""
-HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
-
-
-def _report_neo4j_issue(kind: str, detail: str) -> None:
-    if kind == "Internal Handshake Failed":
-        st.error(kind)
-        print(f"{kind}: {detail}")
-        return
-    message = f"Neo4j connection failed ({kind}). {detail}"
-    st.error(message)
-    print(message)
+# Simple internal connection
+NEO4J_URI = "bolt://neo4j.railway.internal:7687"
+NEO4J_AUTH = (os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD"))
+NEO4J_USER, NEO4J_PASSWORD = NEO4J_AUTH
+HARDWARE_ID = (NEO4J_PASSWORD or "")  # Requirement: gate checks against the Neo4j password value
 
 
 GLOBAL_STYLE = """
@@ -239,35 +230,10 @@ def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
 
 
 def _neo4j_driver():
-    missing = [
-        name
-        for name, value in (("NEO4J_URI", NEO4J_URI), ("NEO4J_USER", NEO4J_USER), ("NEO4J_PASSWORD", NEO4J_PASSWORD))
-        if not value
-    ]
-    if missing:
-        detail = f"Missing environment variables: {', '.join(missing)}"
-        _report_neo4j_issue("Configuration Missing", detail)
-        raise ServiceUnavailable(detail)
-    driver = GraphDatabase.driver(
-        NEO4J_URI,
-        auth=(NEO4J_USER, NEO4J_PASSWORD),
-        resolver=lambda address: [address],
-    )
-    try:
-        driver.verify_connectivity()
-    except ServiceUnavailable as exc:
-        _report_neo4j_issue("Internal Handshake Failed", str(exc))
-        driver.close()
-        raise
-    except AuthError as exc:
-        _report_neo4j_issue("Authentication Failed", str(exc))
-        driver.close()
-        raise
-    except Exception as exc:
-        _report_neo4j_issue("Unknown Failure", str(exc))
-        driver.close()
-        raise
-    return driver
+    if not NEO4J_PASSWORD:
+        st.info("System initializing...")
+        st.stop()
+    return GraphDatabase.driver(NEO4J_URI, auth=NEO4J_AUTH, resolver=lambda addr: [addr])
 
 
 @st.cache_data(ttl=25)
