@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 # Simple internal connection
-NEO4J_URI = "bolt://neo4j.railway.internal:7687"
+NEO4J_URI = "bolt://sentrinode.railway.internal:7687"
 NEO4J_AUTH = (os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD"))
 NEO4J_USER, NEO4J_PASSWORD = NEO4J_AUTH
 HARDWARE_ID = (NEO4J_PASSWORD or "")  # Requirement: gate checks against the Neo4j password value
