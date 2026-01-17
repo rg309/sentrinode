@@ -46,7 +46,7 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-NEO4J_URI = (os.getenv("NEO4J_URI") or "").strip().rstrip("/")
+NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://sentrinode.railway.internal:7687").strip().rstrip("/")
 NEO4J_USER = os.getenv("NEO4J_USER") or ""
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD") or ""
 HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
@@ -244,7 +244,11 @@ def _neo4j_driver():
         detail = f"Missing environment variables: {', '.join(missing)}"
         _report_neo4j_issue("Configuration Missing", detail)
         raise ServiceUnavailable(detail)
-    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    driver = GraphDatabase.driver(
+        NEO4J_URI,
+        auth=(NEO4J_USER, NEO4J_PASSWORD),
+        resolver=lambda address: [address],
+    )
     try:
         driver.verify_connectivity()
     except ServiceUnavailable as exc:
