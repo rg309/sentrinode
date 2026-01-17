@@ -160,8 +160,8 @@ def show_login():
     render_hero("SENTRINODE")
     st.title("SentriNode Login")
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
         if st.form_submit_button("Login"):
             with st.spinner("Syncing with SentriNode Network..."):
                 success, role = authenticate_user(username, password)
@@ -170,6 +170,7 @@ def show_login():
                 st.session_state.user_role = role or "user"
                 st.session_state.username = username.strip()
                 st.toast("Console unlocked. Welcome back.", icon="✅")
+                st.rerun()
                 st.rerun()
             else:
                 st.error("Invalid credentials or unable to verify role.")
@@ -464,3 +465,5 @@ else:
         show_node_manager()
     else:
         show_settings()
+
+st.write("Session debug:", st.session_state)
