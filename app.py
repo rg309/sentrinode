@@ -231,6 +231,8 @@ def _neo4j_driver():
         uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         pwd = os.getenv("NEO4J_PASSWORD")
+        if not pwd:
+            return None
 
         driver = GraphDatabase.driver(
             uri,
@@ -242,18 +244,13 @@ def _neo4j_driver():
         return None
 
 
-def _require_neo4j_driver():
-    driver = _neo4j_driver()
-    if not driver:
-        raise ServiceUnavailable("Neo4j driver unavailable")
-    return driver
-
-
 @st.cache_data(ttl=25)
 def _neo4j_health() -> tuple[bool, str]:
     driver = None
     try:
-        driver = _require_neo4j_driver()
+        driver = _neo4j_driver()
+        if not driver:
+            return False, "Configuring node..."
         with driver.session() as session:
             session.run("RETURN 1").consume()
         return True, "Live"
@@ -269,7 +266,9 @@ def _hardware_registered(hardware_id: str) -> bool:
         return False
     driver = None
     try:
-        driver = _require_neo4j_driver()
+        driver = _neo4j_driver()
+        if not driver:
+            return False
         with driver.session() as session:
             record = session.run(
                 "MATCH (l:License {hardware_id:$hw_id}) RETURN l.hardware_id AS hw LIMIT 1",
@@ -286,7 +285,9 @@ def _hardware_registered(hardware_id: str) -> bool:
 def _register_hardware(hw_id: str, name: str, company: str, email: str) -> bool:
     driver = None
     try:
-        driver = _require_neo4j_driver()
+        driver = _neo4j_driver()
+        if not driver:
+            return False
         with driver.session() as session:
             session.run(
                 """
@@ -316,7 +317,9 @@ def _get_license_profile(hw_id: str) -> dict[str, object] | None:
         return None
     driver = None
     try:
-        driver = _require_neo4j_driver()
+        driver = _neo4j_driver()
+        if not driver:
+            return None
         with driver.session() as session:
             record = session.run(
                 """
@@ -341,7 +344,9 @@ def _get_license_profile(hw_id: str) -> dict[str, object] | None:
 def _fetch_topology() -> tuple[bool, list[dict[str, object]]]:
     driver = None
     try:
-        driver = _require_neo4j_driver()
+        driver = _neo4j_driver()
+        if not driver:
+            raise ServiceUnavailable("Neo4j driver unavailable")
         with driver.session() as session:
             records = session.run(
                 """
