@@ -193,6 +193,16 @@ RETURN n, r, m
 LIMIT 50
 """
 
+SUBGRAPH_QUERY = """
+MATCH (n:Node)
+WHERE ($node_name = '' AND ($search = '' OR toLower(n.name) CONTAINS $search))
+   OR (toLower(n.name) = toLower($node_name))
+WITH n
+MATCH path = (n)-[r*1..2]-(m:Node)
+RETURN nodes(path) AS nodes, relationships(path) AS rels
+LIMIT 200
+"""
+
 TOP_ERRORS_QUERY = """
 MATCH (m:Metric)-[:RECORDED_FOR]->(n:Node)
 WHERE coalesce(m.timestamp, datetime({epochMillis:0})) >= datetime({epochMillis:$since_epoch})
@@ -800,6 +810,50 @@ def _render_graph_overview(filters: FilterContext) -> None:
         agraph(list(nodes_map.values()), edges, config)
     else:
         st.info("Graph visualization unavailable (no data or streamlit-agraph missing).")
+    st.markdown("#### Graph Explorer")
+    search_node = st.text_input("Explore node (exact match or leave blank)", key="graph_focus")
+    params = _time_params(filters)
+    params["node_name"] = (search_node or "").strip()
+    subgraph_rows = _run_cypher(SUBGRAPH_QUERY, params)
+    adjacency: list[dict[str, str]] = []
+    if subgraph_rows and agraph and Node and Edge and Config:
+        graph_nodes: dict[str, Node] = {}
+        graph_edges: list[Edge] = []
+        for row in subgraph_rows:
+            for n in row["nodes"]:
+                if n.id not in graph_nodes:
+                    graph_nodes[n.id] = Node(
+                        id=str(n.id),
+                        label=str(n.get("name", f"node-{n.id}")),
+                        size=20,
+                        color="#4ade80" if (search_node and str(n.get("name","")).lower() == search_node.lower()) else "#a855f7",
+                    )
+            for rel in row["rels"]:
+                graph_edges.append(
+                    Edge(
+                        source=str(rel.start_node.id),
+                        target=str(rel.end_node.id),
+                        title=rel.type,
+                        color="#facc15",
+                    )
+                )
+                adjacency.append(
+                    {
+                        "source": rel.start_node.get("name", rel.start_node.id),
+                        "relation": rel.type,
+                        "target": rel.end_node.get("name", rel.end_node.id),
+                    }
+                )
+        if graph_nodes:
+            config = Config(height=480, width=1000, directed=True, physics=True)
+            agraph(list(graph_nodes.values()), graph_edges, config)
+    if adjacency:
+        st.dataframe(pd.DataFrame(adjacency), hide_index=True, use_container_width=True)
+        if st.button("Export Subgraph CSV"):
+            csv = pd.DataFrame(adjacency).to_csv(index=False)
+            st.download_button("Download Adjacency", csv, "subgraph.csv", mime="text/csv")
+    else:
+        st.info("No subgraph data available for current selection.")
 
 
 def _render_node_health(filters: FilterContext) -> pd.DataFrame:
