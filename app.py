@@ -5,14 +5,7 @@ import pandas as pd
 import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
-try:
-    from supabase import Client, create_client
-except ModuleNotFoundError:
-    class _StubClient:
-        pass
-
-    Client = _StubClient  # type: ignore[assignment]
-    create_client = None  # type: ignore[assignment]
+from supabase import Client, create_client
 
 try:
     from streamlit_agraph import agraph, Config, Edge, Node
