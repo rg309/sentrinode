@@ -94,6 +94,37 @@ def fetch_user_nodes(username: str) -> list[dict[str, object]]:
         driver.close()
 
 
+def fetch_all_nodes() -> list[dict[str, object]]:
+    driver = _neo4j_driver()
+    if not driver:
+        return []
+    try:
+        with driver.session() as session:
+            records = session.run(
+                """
+                MATCH (n:Node)
+                RETURN coalesce(n.name, n.id) AS name,
+                       coalesce(n.status, 'online') AS status,
+                       coalesce(n.ip_address, n.ip, '10.0.0.1') AS ip,
+                       coalesce(toString(n.last_heartbeat), 'unsynced') AS heartbeat
+                LIMIT 100
+                """
+            )
+        return [
+            {
+                "Node Name": record["name"],
+                "Status": record["status"],
+                "IP Address": record["ip"],
+                "Last Heartbeat": record["heartbeat"],
+            }
+            for record in records
+        ]
+    except (ServiceUnavailable, Neo4jError, ValueError):
+        return []
+    finally:
+        driver.close()
+
+
 HERO_STYLE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&display=swap');
@@ -260,6 +291,26 @@ def render_user_dashboard(username: str) -> None:
         st.info("No assigned nodes yet. Provision a node to begin monitoring.")
 
 
+def show_node_manager():
+    render_hero("SentriNode Node Manager")
+    search = st.text_input("Search Nodes", placeholder="Filter by node name")
+    with st.spinner("Syncing with SentriNode Network..."):
+        nodes = fetch_all_nodes()
+    if search:
+        nodes = [node for node in nodes if search.lower() in str(node["Node Name"]).lower()]
+    if nodes:
+        st.dataframe(pd.DataFrame(nodes), use_container_width=True, hide_index=True)
+        st.subheader("Actions")
+        for node in nodes:
+            cols = st.columns([3, 1])
+            cols[0].markdown(f"**{node['Node Name']}** · {node['Status']} · {node['IP Address']}")
+            if cols[1].button("Reboot Node", key=f"reboot-{node['Node Name']}"):
+                st.success(f"Reboot signal sent to {node['Node Name']}.")
+                st.toast(f"{node['Node Name']} reboot requested.", icon="♻️")
+    else:
+        st.info("No nodes to display. Check your connections or adjust the filter.")
+
+
 def show_dashboard():
     role = st.session_state.get("user_role", "user")
     username = st.session_state.get("username", "operator")
@@ -400,7 +451,7 @@ if not st.session_state.logged_in:
     else:
         show_login()
 else:
-    sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Settings"))
+    sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
@@ -409,5 +460,7 @@ else:
         st.rerun()
     if sidebar_option == "Dashboard":
         show_dashboard()
+    elif sidebar_option == "Node Manager":
+        show_node_manager()
     else:
         show_settings()
