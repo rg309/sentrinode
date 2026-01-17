@@ -48,7 +48,17 @@ except Exception:  # pragma: no cover - optional dependency
 
 NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://neo4j:7687").strip().rstrip("/")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+DEFAULT_NEO4J_PASSWORD = "password"  # Matches the local Docker-compose NEO4J_AUTH secret
+
+
+def _get_neo4j_password() -> str:
+    try:  # Prefer Streamlit secrets in hosted environments
+        return st.secrets["NEO4J_PASSWORD"]
+    except Exception:
+        return os.getenv("NEO4J_PASSWORD") or DEFAULT_NEO4J_PASSWORD
+
+
+NEO4J_PASSWORD = _get_neo4j_password()
 HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
 
 
@@ -229,7 +239,14 @@ def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
 
 
 def _neo4j_driver():
-    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    try:
+        driver.verify_connectivity()
+    except Exception as exc:
+        print(f"Neo4j connectivity check failed: {exc}")
+        driver.close()
+        raise
+    return driver
 
 
 @st.cache_data(ttl=25)
