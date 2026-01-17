@@ -38,7 +38,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from neo4j import GraphDatabase
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
+from neo4j.exceptions import AuthError, Neo4jError, ServiceUnavailable
 
 try:  # Optional service graph rendering
     from streamlit_agraph import agraph, Config, Edge, Node
@@ -46,20 +46,16 @@ except Exception:  # pragma: no cover - optional dependency
     agraph = Node = Edge = Config = None
 
 
-NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://neo4j:7687").strip().rstrip("/")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-DEFAULT_NEO4J_PASSWORD = "password"  # Matches the local Docker-compose NEO4J_AUTH secret
-
-
-def _get_neo4j_password() -> str:
-    try:  # Prefer Streamlit secrets in hosted environments
-        return st.secrets["NEO4J_PASSWORD"]
-    except Exception:
-        return os.getenv("NEO4J_PASSWORD") or DEFAULT_NEO4J_PASSWORD
-
-
-NEO4J_PASSWORD = _get_neo4j_password()
+NEO4J_URI = (os.getenv("NEO4J_URI") or "").strip().rstrip("/")
+NEO4J_USER = os.getenv("NEO4J_USER") or ""
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD") or ""
 HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
+
+
+def _report_neo4j_issue(kind: str, detail: str) -> None:
+    message = f"Neo4j connection failed ({kind}). {detail}"
+    st.error(message)
+    print(message)
 
 
 GLOBAL_STYLE = """
@@ -239,11 +235,28 @@ def _render_logo(*, centered: bool = False, caption: str | None = None) -> None:
 
 
 def _neo4j_driver():
+    missing = [
+        name
+        for name, value in (("NEO4J_URI", NEO4J_URI), ("NEO4J_USER", NEO4J_USER), ("NEO4J_PASSWORD", NEO4J_PASSWORD))
+        if not value
+    ]
+    if missing:
+        detail = f"Missing environment variables: {', '.join(missing)}"
+        _report_neo4j_issue("Configuration Missing", detail)
+        raise ServiceUnavailable(detail)
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     try:
         driver.verify_connectivity()
+    except ServiceUnavailable as exc:
+        _report_neo4j_issue("Connection Refused", str(exc))
+        driver.close()
+        raise
+    except AuthError as exc:
+        _report_neo4j_issue("Authentication Failed", str(exc))
+        driver.close()
+        raise
     except Exception as exc:
-        print(f"Neo4j connectivity check failed: {exc}")
+        _report_neo4j_issue("Unknown Failure", str(exc))
         driver.close()
         raise
     return driver
