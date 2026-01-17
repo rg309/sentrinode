@@ -84,6 +84,12 @@ if "access_token" not in st.session_state:
     st.session_state.access_token = None
 if "selected_node" not in st.session_state:
     st.session_state.selected_node = None
+if "node_registered" not in st.session_state:
+    st.session_state.node_registered = False
+if "registration_error" not in st.session_state:
+    st.session_state.registration_error = None
+if "pending_registration" not in st.session_state:
+    st.session_state.pending_registration = None
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -285,6 +291,119 @@ def _supabase_client() -> Client | None:
     return _supabase_client_instance
 
 
+def _neo4j_username_exists(user: str) -> tuple[bool, str | None]:
+    driver = _neo4j_driver()
+    if not driver:
+        return False, "Unable to connect to SentriNode network."
+    try:
+        with driver.session() as session:
+            record = session.run(
+                "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
+                user=(user or "").strip(),
+            ).single()
+        return bool(record), None
+    except (ServiceUnavailable, Neo4jError, ValueError) as exc:
+        return False, str(exc)
+    finally:
+        driver.close()
+
+
+def _run_registration(show_spinner: bool = True) -> None:
+    payload = st.session_state.get("pending_registration")
+    if not payload:
+        return
+    username = (payload.get("username") or "").strip()
+    if not username:
+        st.session_state.registration_error = "Missing username for registration."
+        st.session_state.node_registered = False
+        return
+
+    def _execute() -> tuple[bool, str | None]:
+        driver = _neo4j_driver()
+        if not driver:
+            return False, "Unable to connect to SentriNode network."
+        try:
+            with driver.session() as session:
+                existing = session.run(
+                    "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
+                    user=username,
+                ).single()
+                if existing:
+                    if payload.get("mode") == "signup":
+                        return False, "Username already taken."
+                    return True, None
+                session.run(
+                    """
+                    CREATE (u:User {
+                        username:$user,
+                        email:$email,
+                        password:$password,
+                        role:'user',
+                        created_at:timestamp()
+                    })
+                    """,
+                    user=username,
+                    email=payload.get("email") or username,
+                    password=payload.get("password") or "",
+                )
+                return True, None
+        except (ServiceUnavailable, Neo4jError, ValueError) as exc:
+            return False, str(exc)
+        finally:
+            driver.close()
+
+    if show_spinner:
+        with st.spinner("Registering node with Neo4j..."):
+            success, error = _execute()
+    else:
+        success, error = _execute()
+
+    if success:
+        st.session_state.node_registered = True
+        st.session_state.registration_error = None
+        st.session_state.pending_registration = None
+        st.toast("Node registration complete.", icon="🛰️")
+        st.rerun()
+    else:
+        st.session_state.node_registered = False
+        st.session_state.registration_error = error or "Registration failed."
+
+
+def _start_registration_flow(username: str, email: str, password: str, mode: str) -> None:
+    st.session_state.pending_registration = {
+        "username": (username or "").strip(),
+        "email": (email or "").strip(),
+        "password": password or "",
+        "mode": mode,
+    }
+    st.session_state.registration_error = None
+    st.session_state.node_registered = False
+    _run_registration(show_spinner=True)
+
+
+def _handle_auth_success(
+    res: Any,
+    identifier: str,
+    password: str,
+    mode: str,
+    *,
+    email: str | None = None,
+    toast_message: str | None = None,
+    toast_icon: str = "✅",
+) -> None:
+    resolved_email = (email or identifier or "").strip()
+    username = (identifier or resolved_email).strip()
+    st.session_state["user"] = res.user
+    st.session_state["access_token"] = res.session.access_token
+    st.session_state.username = username
+    st.session_state.logged_in = True
+    st.session_state.show_signup = False
+    st.session_state.user_role = _resolve_user_role(username)
+    message = toast_message or ("Console unlocked. Welcome back." if mode == "login" else "Account created and signed in.")
+    st.toast(message, icon=toast_icon)
+    _start_registration_flow(username, resolved_email, password, mode)
+
+
 def is_strong_password(pw: str) -> tuple[bool, str]:
     if len(pw) < 10:
         return False, "Use at least 10 characters."
@@ -396,13 +515,12 @@ def _time_params(filters: FilterContext) -> dict[str, Any]:
     }
 
 
-def show_login() -> None:
-    render_hero("SENTRINODE")
+def show_login(client: Client | None = None) -> None:
     st.title("SentriNode Login")
-    client = _supabase_client()
+    client = client or _supabase_client()
     if not client:
         st.error("Supabase credentials missing.")
-        st.stop()
+        return
     with st.form("login_form"):
         email = st.text_input("Email", key="login_user")
         password = st.text_input("Password", type="password", key="login_pass")
@@ -415,29 +533,25 @@ def show_login() -> None:
                 res = None
                 st.error(f"Login failed: {exc}")
         if res and res.user and res.session:
-            st.session_state["user"] = res.user
-            st.session_state["access_token"] = res.session.access_token
-            st.session_state.username = (email or "").strip()
-            st.session_state.logged_in = True
-            st.session_state.user_role = _resolve_user_role(st.session_state.username)
-            st.session_state.show_signup = False
-            st.toast("Console unlocked. Welcome back.", icon="✅")
-            st.rerun()
+            _handle_auth_success(
+                res,
+                identifier=email or "",
+                password=password or "",
+                mode="login",
+                email=email or "",
+                toast_message="Console unlocked. Welcome back.",
+                toast_icon="✅",
+            )
         else:
             st.error("Login failed.")
-    if st.button("Create an account"):
-        st.session_state.show_signup = True
-        st.rerun()
-    st.stop()
 
 
-def show_signup() -> None:
-    render_hero("SENTRINODE")
+def show_signup(client: Client | None = None) -> None:
     st.title("Create SentriNode Account")
-    client = _supabase_client()
+    client = client or _supabase_client()
     if not client:
         st.error("Supabase credentials missing.")
-        st.stop()
+        return
     email = st.text_input("Email", key="su_email")
     pw1 = st.text_input("Password", type="password", key="su_pw1")
     pw2 = st.text_input("Re-enter Password", type="password", key="su_pw2")
@@ -445,6 +559,7 @@ def show_signup() -> None:
         "I understand this account will be created with Supabase Auth.", key="su_accept"
     )
     if st.button("Register Node", key="su_btn"):
+        username = (email or "").strip()
         if not accept:
             st.error("Please check the box to continue.")
         elif not email or "@" not in email:
@@ -455,29 +570,61 @@ def show_signup() -> None:
             ok, msg = is_strong_password(pw1)
             if not ok:
                 st.error(msg)
-            else:
-                with st.spinner("Syncing with SentriNode Network..."):
-                    try:
-                        res = client.auth.sign_up({"email": email, "password": pw1})
-                    except Exception as exc:  # pragma: no cover - network
-                        res = None
-                        st.error(f"Sign up failed: {exc}")
-                if res:
-                    if getattr(res, "session", None):
-                        st.session_state["user"] = res.user
-                        st.session_state["access_token"] = res.session.access_token
-                        st.session_state.username = email.strip()
-                        st.session_state.logged_in = True
-                        st.session_state.user_role = _resolve_user_role(st.session_state.username)
-                        st.toast("Account created and signed in.", icon="🎉")
-                        st.rerun()
-                    else:
-                        st.success("Account created. Check your email to confirm, then sign in.")
-                        st.session_state.show_signup = False
-                        st.rerun()
-    if st.button("Back to Login"):
-        st.session_state.show_signup = False
-        st.rerun()
+                return
+            exists, exists_error = _neo4j_username_exists(username)
+            if exists_error:
+                st.error(exists_error)
+                return
+            if exists:
+                st.error("Username already taken.")
+                return
+            with st.spinner("Syncing with SentriNode Network..."):
+                try:
+                    res = client.auth.sign_up({"email": email, "password": pw1})
+                except Exception as exc:  # pragma: no cover - network
+                    res = None
+                    st.error(f"Sign up failed: {exc}")
+            if res:
+                if getattr(res, "session", None):
+                    _handle_auth_success(
+                        res,
+                        identifier=username,
+                        password=pw1 or "",
+                        mode="signup",
+                        email=email,
+                        toast_message="Account created and signed in.",
+                        toast_icon="🎉",
+                    )
+                else:
+                    st.success("Account created. Check your email to confirm, then sign in.")
+
+
+def _render_registration_status() -> None:
+    if not st.session_state.get("user"):
+        return
+    if st.session_state.get("registration_error"):
+        st.error(f"Neo4j registration failed: {st.session_state['registration_error']}")
+        if st.session_state.get("pending_registration") and st.button(
+            "Retry registration", key="retry_registration_btn"
+        ):
+            _run_registration(show_spinner=True)
+    elif not st.session_state.get("node_registered"):
+        st.info("Authenticated. Completing Neo4j registration...")
+
+
+def render_auth_portal() -> None:
+    render_hero("SENTRINODE")
+    st.title("SentriNode Console Access")
+    client = _supabase_client()
+    if not client:
+        st.error("Supabase credentials missing.")
+        st.stop()
+    tab_login, tab_signup = st.tabs(["Login", "Create account"])
+    with tab_login:
+        show_login(client)
+    with tab_signup:
+        show_signup(client)
+    _render_registration_status()
     st.stop()
 
 
@@ -1203,11 +1350,12 @@ def show_settings():
 
 
 # --- MAIN NAVIGATION ---
-if not st.session_state.get("user") or not st.session_state.get("access_token"):
-    if st.session_state.show_signup:
-        show_signup()
-    else:
-        show_login()
+if (
+    not st.session_state.get("user")
+    or not st.session_state.get("access_token")
+    or not st.session_state.get("node_registered")
+):
+    render_auth_portal()
 else:
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
@@ -1218,6 +1366,9 @@ else:
         st.session_state.user = None
         st.session_state.access_token = None
         st.session_state.show_signup = False
+        st.session_state.node_registered = False
+        st.session_state.registration_error = None
+        st.session_state.pending_registration = None
         st.rerun()
     if sidebar_option == "Dashboard":
         show_dashboard()
