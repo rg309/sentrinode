@@ -16,10 +16,10 @@ def show_login():
         if st.form_submit_button("Login"):
             # We will add DB check here later
             st.session_state.logged_in = True
-            st.experimental_rerun()
+            st.rerun()
     if st.button("Create an account"):
         st.session_state.show_signup = True
-        st.experimental_rerun()
+        st.rerun()
 
 
 def show_signup():
@@ -32,10 +32,10 @@ def show_signup():
             # We will add DB save here later
             st.success("Account created! Please log in.")
             st.session_state.show_signup = False
-            st.experimental_rerun()
+            st.rerun()
     if st.button("Back to Login"):
         st.session_state.show_signup = False
-        st.experimental_rerun()
+        st.rerun()
 
 
 # --- MAIN NAVIGATION ---
@@ -49,4 +49,4 @@ else:
     st.write("Welcome to the production environment.")
     if st.button("Logout"):
         st.session_state.logged_in = False
-        st.experimental_rerun()
+        st.rerun()
