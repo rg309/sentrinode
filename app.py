@@ -5,7 +5,11 @@ import pandas as pd
 import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
-from supabase import Client, create_client
+try:
+    from supabase import Client, create_client
+except ModuleNotFoundError:
+    Client = None  # type: ignore[assignment]
+    create_client = None  # type: ignore[assignment]
 
 try:
     from streamlit_agraph import agraph, Config, Edge, Node
@@ -48,6 +52,9 @@ def _neo4j_driver():
 
 def _supabase_client() -> Client | None:
     global _supabase_client_instance
+    if create_client is None:
+        st.error("Supabase client library is not installed. Please add `supabase` to your environment.")
+        return None
     if _supabase_client_instance is None:
         if not SUPABASE_URL or not SUPABASE_ANON_KEY:
             return None
