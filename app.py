@@ -9,6 +9,33 @@ if "show_signup" not in st.session_state:
 
 # --- UI LOGIC ---
 def show_login():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&display=swap');
+        .sentri-hero {
+            font-family: 'Syncopate', sans-serif;
+            letter-spacing: 0.65rem;
+            font-size: 2.75rem;
+            text-transform: uppercase;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(120deg, #0ea5e9, #38bdf8, #e0f2fe, #0ea5e9);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: sentriShift 6s ease-in-out infinite;
+        }
+        @keyframes sentriShift {
+            0% {background-position: 0% 50%;}
+            50% {background-position: 100% 50%;}
+            100% {background-position: 0% 50%;}
+        }
+        </style>
+        <div class="sentri-hero">SENTRINODE</div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("SentriNode Login")
     with st.form("login_form"):
         st.text_input("Username")
