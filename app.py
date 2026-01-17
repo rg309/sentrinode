@@ -49,7 +49,7 @@ except Exception:  # pragma: no cover - optional dependency
 NEO4J_URI = (os.getenv("NEO4J_URI") or "bolt://neo4j:7687").strip().rstrip("/")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-LICENSE_SERIAL = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
+HARDWARE_ID = NEO4J_PASSWORD  # Requirement: gate checks against the Neo4j password value
 
 
 GLOBAL_STYLE = """
@@ -247,16 +247,16 @@ def _neo4j_health() -> tuple[bool, str]:
             driver.close()
 
 
-def _license_registered(serial: str) -> bool:
-    if not serial:
+def _hardware_registered(hardware_id: str) -> bool:
+    if not hardware_id:
         return False
     driver = None
     try:
         driver = _neo4j_driver()
         with driver.session() as session:
             record = session.run(
-                "MATCH (l:License {serial:$serial}) RETURN l.serial AS serial LIMIT 1",
-                serial=serial,
+                "MATCH (l:License {hardware_id:$hw_id}) RETURN l.hardware_id AS hw LIMIT 1",
+                hw_id=hardware_id,
             ).single()
         return bool(record)
     except (ServiceUnavailable, Neo4jError, ValueError):
@@ -266,24 +266,22 @@ def _license_registered(serial: str) -> bool:
             driver.close()
 
 
-def _create_license(serial: str, admin: str, company: str, email: str) -> bool:
+def _register_hardware(hw_id: str, name: str, company: str, email: str) -> bool:
     driver = None
     try:
         driver = _neo4j_driver()
         with driver.session() as session:
             session.run(
                 """
-                MERGE (l:License {serial:$serial})
-                ON CREATE SET l.created_at = timestamp()
-                SET l.admin = $admin,
+                MERGE (l:License {hardware_id: $hw_id})
+                SET l.name = $name,
                     l.company = $company,
                     l.email = $email,
                     l.status = 'active',
-                    l.updated = timestamp(),
-                    l.last_seen = timestamp()
+                    l.trial_start = datetime()
                 """,
-                serial=serial,
-                admin=admin.strip(),
+                hw_id=hw_id,
+                name=name.strip(),
                 company=company.strip(),
                 email=email.strip(),
             )
@@ -296,8 +294,8 @@ def _create_license(serial: str, admin: str, company: str, email: str) -> bool:
 
 
 @st.cache_data(ttl=30)
-def _get_license_profile(serial: str) -> dict[str, object] | None:
-    if not serial:
+def _get_license_profile(hw_id: str) -> dict[str, object] | None:
+    if not hw_id:
         return None
     driver = None
     try:
@@ -305,14 +303,14 @@ def _get_license_profile(serial: str) -> dict[str, object] | None:
         with driver.session() as session:
             record = session.run(
                 """
-                MATCH (l:License {serial:$serial})
-                RETURN l.admin AS admin,
+                MATCH (l:License {hardware_id:$hw_id})
+                RETURN l.name AS name,
                        l.company AS company,
                        l.email AS email,
                        l.status AS status,
                        l.type AS type
                 """,
-                serial=serial,
+                hw_id=hw_id,
             ).single()
         return dict(record) if record else None
     except (ServiceUnavailable, Neo4jError, ValueError):
@@ -409,7 +407,7 @@ def _dependency_table(records: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _render_onboarding(serial: str) -> None:
+def _render_onboarding(hw_id: str) -> None:
     st.markdown(
         """
         <style>
@@ -427,14 +425,14 @@ def _render_onboarding(serial: str) -> None:
     )
     error_msg = ""
     with st.form("system-onboarding"):
-        admin = st.text_input("Administrator Name")
-        company = st.text_input("Company / Facility")
-        email = st.text_input("Operations Email")
+        name = st.text_input("Name")
+        company = st.text_input("Company")
+        email = st.text_input("Email")
         submitted = st.form_submit_button("Authorize Node", use_container_width=True)
         if submitted:
-            if not admin.strip() or not company.strip() or not email.strip():
+            if not name.strip() or not company.strip() or not email.strip():
                 error_msg = "All fields are required."
-            elif _create_license(serial, admin, company, email):
+            elif _register_hardware(hw_id, name, company, email):
                 st.success("License registered. Reloading console...")
                 st.rerun()
             else:
@@ -507,15 +505,15 @@ def _render_dashboard() -> None:
             st.table(dep_table)
 
 
-def _render_account(serial: str) -> None:
+def _render_account(hw_id: str) -> None:
     _render_logo(caption="Account Console")
-    st.markdown(f"**Hardware Key:** `{serial or 'Unavailable'}`")
-    profile = _get_license_profile(serial)
+    st.markdown(f"**Hardware Key:** `{hw_id or 'Unavailable'}`")
+    profile = _get_license_profile(hw_id)
     if not profile:
         st.info("No account metadata stored yet. The license node will populate after registration.")
         return
     info = {
-        "Administrator": profile.get("admin") or "—",
+        "Administrator": profile.get("name") or "—",
         "Company": profile.get("company") or "—",
         "Email": profile.get("email") or "—",
         "License Type": profile.get("type") or "trial",
@@ -527,14 +525,18 @@ def _render_account(serial: str) -> None:
         st.divider()
 
 
+def _enforce_gatekeeper() -> None:
+    if _hardware_registered(HARDWARE_ID):
+        return
+    _render_onboarding(HARDWARE_ID)
+
+
 def main() -> None:
-    registered = _license_registered(LICENSE_SERIAL)
     _inject_styles()
-    if not registered:
-        _render_onboarding(LICENSE_SERIAL)
+    _enforce_gatekeeper()
     view = _render_sidebar()
     if view == "Account":
-        _render_account(LICENSE_SERIAL)
+        _render_account(HARDWARE_ID)
     else:
         _render_dashboard()
 
