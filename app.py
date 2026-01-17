@@ -465,5 +465,3 @@ else:
         show_node_manager()
     else:
         show_settings()
-
-st.write("Session debug:", st.session_state)
