@@ -9,3 +9,4 @@ joblib>=1.4
 neo4j>=5.20
 requests>=2.31
 python-dotenv>=1.0
+supabase>=2.4

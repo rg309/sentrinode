@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 from neo4j import GraphDatabase
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
+from supabase import Client, create_client
 
 try:
     from streamlit_agraph import agraph, Config, Edge, Node
@@ -22,6 +23,14 @@ if "user_role" not in st.session_state:
     st.session_state.user_role = "user"
 if "username" not in st.session_state:
     st.session_state.username = ""
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+_supabase_client_instance: Client | None = None
 
 
 def _neo4j_driver():
@@ -35,6 +44,15 @@ def _neo4j_driver():
     except Exception as exc:
         st.warning(f"Neo4j connect failed: {exc}")
         return None
+
+
+def _supabase_client() -> Client | None:
+    global _supabase_client_instance
+    if _supabase_client_instance is None:
+        if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+            return None
+        _supabase_client_instance = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    return _supabase_client_instance
 
 
 def authenticate_user(username: str, password: str) -> tuple[bool, str | None]:
@@ -157,18 +175,47 @@ def render_hero(text: str) -> None:
 
 # --- UI LOGIC ---
 def show_login():
+    if st.session_state.show_signup:
+        show_signup()
+        st.stop()
     render_hero("SENTRINODE")
     st.title("SentriNode Login")
-    with st.form("login_form"):
-        username = st.text_input("Username", key="login_user")
+    with st.form("supabase-login"):
+        email = st.text_input("Email", key="login_user")
         password = st.text_input("Password", type="password", key="login_pass")
-        if st.form_submit_button("Login"):
-            st.session_state.username = st.session_state.login_user.strip()
+        submitted = st.form_submit_button("Login")
+    if submitted:
+        client = _supabase_client()
+        if not client:
+            st.error("Supabase credentials missing.")
+        else:
             with st.spinner("Syncing with SentriNode Network..."):
-                success, role = authenticate_user(st.session_state.username, password)
-            if success:
+                try:
+                    auth_response = client.auth.sign_in_with_password({"email": email, "password": password})
+                except Exception:
+                    auth_response = None
+            if auth_response and auth_response.user and auth_response.session:
+                st.session_state["user"] = auth_response.user
+                st.session_state["access_token"] = auth_response.session.access_token
+                st.session_state.username = (email or "").strip()
                 st.session_state.logged_in = True
-                st.session_state.user_role = role or "user"
+                st.session_state.show_signup = False
+                role = st.session_state.user_role
+                driver = _neo4j_driver()
+                if driver:
+                    try:
+                        with driver.session() as session:
+                            record = session.run(
+                                "MATCH (u:User {username:$username}) RETURN coalesce(u.role,'user') AS role LIMIT 1",
+                                username=st.session_state.username,
+                            ).single()
+                        if record and record["role"]:
+                            role = record["role"]
+                    except (ServiceUnavailable, Neo4jError, ValueError):
+                        pass
+                    finally:
+                        driver.close()
+                st.session_state.user_role = role
                 st.toast("Console unlocked. Welcome back.", icon="✅")
                 st.rerun()
             else:
@@ -176,6 +223,7 @@ def show_login():
     if st.button("Create an account"):
         st.session_state.show_signup = True
         st.rerun()
+    st.stop()
 
 
 def show_signup():
@@ -481,11 +529,8 @@ def show_settings():
 
 
 # --- MAIN NAVIGATION ---
-if not st.session_state.logged_in or not st.session_state.username:
-    if st.session_state.show_signup:
-        show_signup()
-    else:
-        show_login()
+if not st.session_state.get("user") or not st.session_state.get("access_token"):
+    show_login()
 else:
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
@@ -493,6 +538,9 @@ else:
         st.session_state.logged_in = False
         st.session_state.user_role = "user"
         st.session_state.username = ""
+        st.session_state.user = None
+        st.session_state.access_token = None
+        st.session_state.show_signup = False
         st.rerun()
     if sidebar_option == "Dashboard":
         show_dashboard()
