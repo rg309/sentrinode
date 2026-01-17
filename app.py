@@ -8,7 +8,10 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 try:
     from supabase import Client, create_client
 except ModuleNotFoundError:
-    Client = None  # type: ignore[assignment]
+    class _StubClient:
+        pass
+
+    Client = _StubClient  # type: ignore[assignment]
     create_client = None  # type: ignore[assignment]
 
 try:
