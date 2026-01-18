@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
+import numpy as np
+import plotly.express as px
 from supabase import Client, create_client
 
 try:
@@ -84,6 +86,10 @@ if "selected_node" not in st.session_state:
     st.session_state.selected_node = None
 if "registration_attempted" not in st.session_state:
     st.session_state.registration_attempted = False
+if "dashboard_time_range" not in st.session_state:
+    st.session_state.dashboard_time_range = "Last 1 hour"
+if "dashboard_demo" not in st.session_state:
+    st.session_state.dashboard_demo = False
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -328,6 +334,102 @@ def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
     return []
 
 
+def _selected_time_range() -> tuple[str, datetime, datetime]:
+    options = ["Last 15 minutes", "Last 1 hour", "Last 6 hours", "Last 24 hours", "Last 7 days"]
+    default_label = st.session_state.get("dashboard_time_range", "Last 1 hour")
+    default_index = options.index(default_label) if default_label in options else 1
+    label = st.selectbox("Time Range", options, index=default_index, key="dashboard_time_range")
+    now = datetime.utcnow()
+    delta = TIME_WINDOWS.get(label, timedelta(hours=1))
+    return label, now - delta, now
+
+
+def _generate_demo_dashboard_data(start: datetime, end: datetime) -> dict[str, Any]:
+    rng = np.random.default_rng(42)
+    timestamps = pd.date_range(start, end, periods=32)
+    latency_p50 = 80 + rng.normal(0, 5, size=len(timestamps)).cumsum() / 10
+    latency_p95 = latency_p50 + 40 + rng.normal(0, 8, size=len(timestamps))
+    error_rate = np.clip(rng.normal(0.02, 0.005, size=len(timestamps)), 0, 0.08)
+    rpm = np.clip(500 + rng.normal(0, 30, size=len(timestamps)).cumsum() / 5, 300, 900)
+    df_latency = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "latency_p50": latency_p50,
+            "latency_p95": latency_p95,
+            "error_rate": error_rate,
+            "rpm": rpm,
+        }
+    )
+    kpis = {
+        "p50": float(np.median(latency_p50)),
+        "p95": float(np.median(latency_p95)),
+        "error_rate": float(np.mean(error_rate) * 100),
+        "rpm": float(np.median(rpm)),
+    }
+    services = [f"service-{i}" for i in range(1, 6)]
+    service_p95 = np.clip(90 + rng.normal(0, 10, size=len(services)), 70, 140)
+    top_services = pd.DataFrame({"Service": services, "p95_latency_ms": service_p95}).sort_values(
+        by="p95_latency_ms", ascending=False
+    )
+    events = pd.DataFrame(
+        {
+            "timestamp": pd.date_range(end - timedelta(hours=2), end, periods=6),
+            "event": [
+                "Health check OK",
+                "Deploy completed",
+                "Health check OK",
+                "Auto-scaling event",
+                "Health check OK",
+                "Config sync",
+            ],
+            "status": ["ok", "info", "ok", "info", "ok", "info"],
+        }
+    )
+    return {"kpis": kpis, "latency": df_latency, "top_services": top_services, "events": events}
+
+
+def _render_kpi_cards(kpis: dict[str, float]) -> None:
+    cols = st.columns(4)
+    cols[0].metric("p50 latency (ms)", f"{kpis.get('p50', 0):.1f}")
+    cols[1].metric("p95 latency (ms)", f"{kpis.get('p95', 0):.1f}")
+    cols[2].metric("Error rate (%)", f"{kpis.get('error_rate', 0):.2f}")
+    cols[3].metric("Requests / min", f"{kpis.get('rpm', 0):.0f}")
+
+
+def _render_latency_chart(df: pd.DataFrame, demo_enabled: bool) -> None:
+    st.subheader("Latency over time")
+    if df is None or df.empty:
+        if demo_enabled:
+            st.info("No latency samples available.")
+        else:
+            st.info("Enable demo mode to see sample latency trends.")
+        return
+    fig = px.line(
+        df,
+        x="timestamp",
+        y=["latency_p50", "latency_p95"],
+        labels={"value": "Latency (ms)", "timestamp": "Time", "variable": "Series"},
+    )
+    fig.update_layout(height=300, legend_title_text="")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_dashboard_tables(top_services: pd.DataFrame, events: pd.DataFrame, demo_enabled: bool) -> None:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Top services by p95 latency")
+        if top_services is None or top_services.empty:
+            st.info("Enable demo mode to view sample service metrics.")
+        else:
+            st.dataframe(top_services, use_container_width=True, hide_index=True)
+    with col2:
+        st.subheader("Recent events")
+        if events is None or events.empty:
+            st.info("Enable demo mode to view recent events.")
+        else:
+            st.dataframe(events, use_container_width=True, hide_index=True)
+
+
 def _sidebar_filters(container=None) -> FilterContext:
     container = container or st.sidebar
     with container:
@@ -565,8 +667,18 @@ def render_admin_dashboard() -> None:
 
 
 def render_user_dashboard(username: str) -> None:
-    st.caption("Personal Node Status")
-    st.info("Temporarily disabled while storage is being migrated.")
+    st.title("Dashboard")
+    subtitle = getattr(st.session_state.get("user"), "email", None) or username or "user"
+    st.caption(subtitle)
+    time_label, start, end = _selected_time_range()
+    demo_enabled = st.checkbox("Demo mode", value=st.session_state.get("dashboard_demo", False), key="dashboard_demo")
+    if demo_enabled:
+        data = _generate_demo_dashboard_data(start, end)
+    else:
+        data = {"kpis": {"p50": 0, "p95": 0, "error_rate": 0, "rpm": 0}, "latency": pd.DataFrame(), "top_services": pd.DataFrame(), "events": pd.DataFrame()}
+    _render_kpi_cards(data["kpis"])
+    _render_latency_chart(data.get("latency"), demo_enabled)
+    _render_dashboard_tables(data.get("top_services"), data.get("events"), demo_enabled)
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
@@ -596,15 +708,7 @@ def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
 
 def _render_time_series(df: pd.DataFrame) -> None:
     st.subheader("Trends")
-    latency_cols = st.columns(1)
-    latency_cols[0].line_chart(
-        df.set_index("bucket_date")[["latency_p50", "latency_p95", "latency_p99"]],
-        height=220,
-    )
-    metric_cols = st.columns(3)
-    metric_cols[0].line_chart(df.set_index("bucket_date")[["error_rate"]], height=180)
-    metric_cols[1].line_chart(df.set_index("bucket_date")[["throughput_rps"]], height=180)
-    metric_cols[2].line_chart(df.set_index("bucket_date")[["cpu", "memory", "disk"]], height=180)
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _fetch_top_lists(filters: FilterContext) -> dict[str, pd.DataFrame]:
@@ -791,47 +895,7 @@ def _render_boards(filters: FilterContext, top_lists: dict[str, pd.DataFrame]) -
 
 
 def _generate_alerts(filters: FilterContext) -> list[dict[str, str]]:
-    alerts = []
-    data = _run_cypher(ALERT_SOURCE_QUERY, _time_params(filters))
-    now = datetime.utcnow()
-    for row in data:
-        last_seen_str = row.get("last_seen")
-        last_seen_dt = None
-        if isinstance(last_seen_str, datetime):
-            last_seen_dt = last_seen_str
-        else:
-            try:
-                last_seen_dt = datetime.fromisoformat(str(last_seen_str))
-            except Exception:
-                last_seen_dt = None
-        if last_seen_dt and now - last_seen_dt > timedelta(hours=1):
-            alerts.append(
-                {
-                    "severity": "high",
-                    "title": f"Node {row['name']} missing heartbeat",
-                    "detail": f"Last seen {last_seen_dt.isoformat()}",
-                    "suggestion": "Check node agent connectivity.",
-                }
-            )
-        if row.get("error_rate", 0) and row["error_rate"] > 0.05:
-            alerts.append(
-                {
-                    "severity": "medium",
-                    "title": f"Error spike on {row['name']}",
-                    "detail": f"Error rate {row['error_rate']:.2%}",
-                    "suggestion": "Inspect recent deployments or upstream dependencies.",
-                }
-            )
-        if row.get("latency_p95", 0) and row["latency_p95"] > 500:
-            alerts.append(
-                {
-                    "severity": "medium",
-                    "title": f"Latency spike on {row['name']}",
-                    "detail": f"P95 latency {row['latency_p95']:.1f} ms",
-                    "suggestion": "Check downstream services for saturation.",
-                }
-            )
-    return alerts
+    return []
 
 
 def _render_alerts(filters: FilterContext) -> None:
@@ -903,7 +967,7 @@ def show_dashboard():
         render_hero("SentriNode Operational Command")
         render_admin_dashboard()
     else:
-        render_hero("SentriNode Node Status")
+        render_hero("Dashboard")
         render_user_dashboard(username)
     st.caption(f"Last synced: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
