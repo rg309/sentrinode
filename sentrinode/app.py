@@ -700,6 +700,7 @@ def _render_registration_status() -> None:
 def render_auth_portal() -> None:
     render_hero("SENTRINODE")
     st.title("SentriNode Console Access")
+    st.caption(f"NEO4J_URI: {os.getenv('NEO4J_URI') or 'unset'}")
     client = _supabase_client()
     if not client:
         st.error("Supabase credentials missing.")
@@ -1461,6 +1462,7 @@ def show_settings():
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
     render_auth_portal()
 else:
+    st.caption(f"NEO4J_URI: {os.getenv('NEO4J_URI') or 'unset'}")
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):
