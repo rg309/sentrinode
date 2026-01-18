@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from supabase import Client, create_client
 
@@ -88,6 +90,10 @@ if "registration_error" not in st.session_state:
     st.session_state.registration_error = None
 if "pending_registration" not in st.session_state:
     st.session_state.pending_registration = None
+if "dashboard_time_range" not in st.session_state:
+    st.session_state.dashboard_time_range = "Last 24h"
+if "dashboard_demo" not in st.session_state:
+    st.session_state.dashboard_demo = False
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -109,6 +115,14 @@ TIME_WINDOWS = {
     "Last 24 hours": timedelta(hours=24),
     "Last 7 days": timedelta(days=7),
     "Last 30 days": timedelta(days=30),
+}
+
+DASHBOARD_TIME_RANGES = {
+    "Last 15m": timedelta(minutes=15),
+    "Last 1h": timedelta(hours=1),
+    "Last 6h": timedelta(hours=6),
+    "Last 24h": timedelta(hours=24),
+    "Last 7d": timedelta(days=7),
 }
 
 MetricsPayload = dict[str, Any]
@@ -561,6 +575,123 @@ def _render_kpi_tiles(kpis: MetricsPayload) -> None:
     cols[3].metric("Memory Saturation", f"{kpis['memory'] or 0:.1f}%")
 
 
+def _selected_time_range() -> tuple[str, datetime, datetime]:
+    label = st.session_state.get("dashboard_time_range", "Last 24h")
+    delta = DASHBOARD_TIME_RANGES.get(label, timedelta(hours=24))
+    end = datetime.utcnow()
+    start = end - delta
+    return label, start, end
+
+
+def _generate_demo_dashboard_data(start: datetime, end: datetime) -> dict[str, Any]:
+    rng = np.random.default_rng(42)
+    periods = max(12, min(60, int((end - start).total_seconds() // 900) or 12))
+    timeline = pd.date_range(start, end, periods=periods)
+    latency_p50 = rng.normal(120, 12, size=periods).clip(min=55)
+    latency_p95 = latency_p50 + rng.normal(45, 10, size=periods).clip(min=25)
+    error_rate = rng.uniform(0.002, 0.02, size=periods)
+    rpm = rng.integers(160, 360, size=periods)
+    kpis = {
+        "latency_p50": float(pd.Series(latency_p50).median()),
+        "latency_p95": float(pd.Series(latency_p95).quantile(0.95)),
+        "error_rate": float(pd.Series(error_rate).mean() * 100),
+        "rpm": int(pd.Series(rpm).mean()),
+    }
+    top_services = (
+        pd.DataFrame(
+            {
+                "Service": ["api-gateway", "billing", "auth", "frontend", "analytics"],
+                "p95 latency (ms)": rng.normal(230, 25, size=5).round(1),
+                "Error rate (%)": rng.uniform(0.2, 2.0, size=5).round(2),
+            }
+        )
+        .sort_values("p95 latency (ms)", ascending=False)
+        .reset_index(drop=True)
+    )
+    events = pd.DataFrame(
+        {
+            "Time": timeline[-8:],
+            "Event": [
+                "Health check passed",
+                "Deploy completed",
+                "Scaling event",
+                "Latency probe",
+                "Cache warm",
+                "Background job",
+                "Synthetic check",
+                "API heartbeat",
+            ],
+            "Status": ["OK", "OK", "OK", "Warning", "OK", "OK", "OK", "OK"],
+        }
+    )
+    latency = pd.DataFrame(
+        {
+            "timestamp": timeline,
+            "latency_p50": latency_p50,
+            "latency_p95": latency_p95,
+        }
+    )
+    return {"kpis": kpis, "latency": latency, "top_services": top_services, "events": events}
+
+
+def _empty_dashboard_data() -> dict[str, Any]:
+    return {
+        "kpis": {"latency_p50": None, "latency_p95": None, "error_rate": None, "rpm": None},
+        "latency": pd.DataFrame(columns=["timestamp", "latency_p50", "latency_p95"]),
+        "top_services": pd.DataFrame(columns=["Service", "p95 latency (ms)", "Error rate (%)"]),
+        "events": pd.DataFrame(columns=["Time", "Event", "Status"]),
+    }
+
+
+def _render_empty_state(message: str) -> None:
+    st.info(message)
+
+
+def _render_kpi_cards(kpis: dict[str, Any]) -> None:
+    cols = st.columns(4)
+    cols[0].metric(
+        "p50 latency (ms)", "—" if kpis["latency_p50"] is None else f"{kpis['latency_p50']:.1f}"
+    )
+    cols[1].metric(
+        "p95 latency (ms)", "—" if kpis["latency_p95"] is None else f"{kpis['latency_p95']:.1f}"
+    )
+    cols[2].metric(
+        "Error rate (%)", "—" if kpis["error_rate"] is None else f"{kpis['error_rate']:.2f}"
+    )
+    cols[3].metric("Requests / min", "—" if kpis["rpm"] is None else f"{kpis['rpm']}")
+
+
+def _render_latency_chart(df: pd.DataFrame) -> None:
+    st.subheader("Latency over time")
+    if df.empty:
+        _render_empty_state("No latency data available for this range. Enable demo mode to explore the dashboard.")
+        return
+    fig = px.line(
+        df,
+        x="timestamp",
+        y=["latency_p50", "latency_p95"],
+        labels={"timestamp": "Time", "value": "Latency (ms)", "variable": "Percentile"},
+    )
+    fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_dashboard_tables(top_services: pd.DataFrame, events: pd.DataFrame) -> None:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Top services by p95 latency")
+        if top_services.empty:
+            _render_empty_state("No services to display. Enable demo mode or connect your data.")
+        else:
+            st.dataframe(top_services, use_container_width=True, hide_index=True)
+    with col2:
+        st.subheader("Recent events or health checks")
+        if events.empty:
+            _render_empty_state("No recent events to show. Enable demo mode to preview activity.")
+        else:
+            st.dataframe(events, use_container_width=True, hide_index=True)
+
+
 HERO_STYLE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&display=swap');
@@ -604,8 +735,29 @@ def render_admin_dashboard() -> None:
 
 
 def render_user_dashboard(username: str) -> None:
-    st.caption("Personal Node Status")
-    st.info("Temporarily disabled while storage is being migrated.")
+    user_obj = st.session_state.get("user")
+    user_email = getattr(user_obj, "email", None) or st.session_state.get("username") or username
+    header_cols = st.columns([3, 2, 1])
+    with header_cols[0]:
+        st.title("Dashboard")
+        if user_email:
+            st.caption(user_email)
+    with header_cols[1]:
+        st.selectbox("Time range", list(DASHBOARD_TIME_RANGES.keys()), key="dashboard_time_range")
+    with header_cols[2]:
+        st.checkbox("Demo mode", key="dashboard_demo")
+
+    _, start, end = _selected_time_range()
+    demo_mode = st.session_state.get("dashboard_demo", False)
+    data = _generate_demo_dashboard_data(start, end) if demo_mode else _empty_dashboard_data()
+    if not demo_mode:
+        _render_empty_state(
+            "Demo mode is off. Enable it to explore the dashboard while data sources are connected."
+        )
+
+    _render_kpi_cards(data["kpis"])
+    _render_latency_chart(data["latency"])
+    _render_dashboard_tables(data["top_services"], data["events"])
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
@@ -807,7 +959,7 @@ def show_dashboard():
         render_hero("SentriNode Operational Command")
         render_admin_dashboard()
     else:
-        render_hero("SentriNode Node Status")
+        render_hero("Dashboard")
         render_user_dashboard(username)
     st.caption(f"Last synced: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
