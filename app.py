@@ -94,6 +94,18 @@ if "dashboard_time_range" not in st.session_state:
     st.session_state.dashboard_time_range = "Last 24h"
 if "dashboard_demo" not in st.session_state:
     st.session_state.dashboard_demo = False
+if "last_login" not in st.session_state:
+    st.session_state.last_login = None
+if "pref_default_time_range" not in st.session_state:
+    st.session_state.pref_default_time_range = "24h"
+if "pref_timezone" not in st.session_state:
+    st.session_state.pref_timezone = "Auto"
+if "pref_units" not in st.session_state:
+    st.session_state.pref_units = "ms"
+if "pref_email_notifications" not in st.session_state:
+    st.session_state.pref_email_notifications = True
+if "support_tickets" not in st.session_state:
+    st.session_state.support_tickets = []
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -334,6 +346,7 @@ def _handle_auth_success(
     st.session_state.logged_in = True
     st.session_state.show_signup = False
     st.session_state.user_role = _resolve_user_role(username)
+    st.session_state.last_login = datetime.utcnow()
     message = toast_message or ("Console unlocked. Welcome back." if mode == "login" else "Account created and signed in.")
     st.toast(message, icon=toast_icon)
     _start_registration_flow(username, resolved_email, password, mode)
@@ -979,7 +992,163 @@ def _change_password(username: str, old_password: str, new_password: str) -> boo
 
 def show_settings():
     st.header("Account Settings")
-    st.info("Temporarily disabled while storage is being migrated.")
+    client = _supabase_client()
+    user = st.session_state.get("user")
+    user_email = getattr(user, "email", None) or st.session_state.get("username") or ""
+    user_id = getattr(user, "id", "") if user else ""
+    last_login = st.session_state.get("last_login")
+
+    def _logout():
+        st.session_state.logged_in = False
+        st.session_state.user_role = "user"
+        st.session_state.username = ""
+        st.session_state.user = None
+        st.session_state.access_token = None
+        st.session_state.show_signup = False
+        st.session_state.node_registered = False
+        st.session_state.registration_error = None
+        st.session_state.pending_registration = None
+        st.session_state.last_login = None
+        st.rerun()
+
+    st.subheader("Account")
+    acc_cols = st.columns(2)
+    acc_cols[0].text_input("Email", value=user_email or "Unknown", disabled=True)
+    acc_cols[1].text_input("User ID", value=user_id or "Unknown", disabled=True)
+    st.caption(
+        f"Last login: {last_login.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(last_login, datetime) else 'Unknown'}"
+    )
+    st.button("Logout", key="settings_logout_btn", on_click=_logout)
+
+    st.divider()
+    st.subheader("Security")
+    if st.button("Send password reset email", key="settings_pw_reset"):
+        if client and user_email:
+            try:
+                client.auth.reset_password_email(user_email)
+                st.success("Password reset email sent.")
+            except Exception as exc:  # pragma: no cover - network
+                st.error(f"Could not send reset email: {exc}")
+        else:
+            st.warning("Email unavailable for password reset.")
+
+    st.warning("Delete account is irreversible.")
+    delete_confirm = st.text_input("Type DELETE to confirm", key="settings_delete_confirm")
+    if st.button("Delete account", key="settings_delete_account"):
+        if delete_confirm != "DELETE":
+            st.error("Please type DELETE to confirm.")
+        else:
+            st.info("Coming soon. Account deletion requires elevated permissions.")
+
+    st.divider()
+    st.subheader("Preferences")
+    range_options = ["15m", "1h", "6h", "24h", "7d"]
+    tz_options = ["Auto", "UTC", "Local"]
+    units_options = ["ms", "s"]
+    pref_time_range = st.selectbox(
+        "Default dashboard time range",
+        range_options,
+        index=range_options.index(st.session_state.pref_default_time_range)
+        if st.session_state.pref_default_time_range in range_options
+        else 3,
+        key="settings_pref_time_range",
+    )
+    pref_timezone = st.selectbox(
+        "Timezone display",
+        tz_options,
+        index=tz_options.index(st.session_state.pref_timezone)
+        if st.session_state.pref_timezone in tz_options
+        else 0,
+        key="settings_pref_timezone",
+    )
+    pref_units = st.selectbox(
+        "Units",
+        units_options,
+        index=units_options.index(st.session_state.pref_units)
+        if st.session_state.pref_units in units_options
+        else 0,
+        key="settings_pref_units",
+    )
+    pref_email = st.checkbox(
+        "Email notifications",
+        value=st.session_state.pref_email_notifications,
+        key="settings_pref_email_notifications",
+    )
+
+    if st.button("Save preferences", key="settings_save_prefs"):
+        st.session_state.pref_default_time_range = pref_time_range
+        st.session_state.pref_timezone = pref_timezone
+        st.session_state.pref_units = pref_units
+        st.session_state.pref_email_notifications = pref_email
+        range_map = {
+            "15m": "Last 15m",
+            "1h": "Last 1h",
+            "6h": "Last 6h",
+            "24h": "Last 24h",
+            "7d": "Last 7d",
+        }
+        st.session_state.dashboard_time_range = range_map.get(
+            pref_time_range, st.session_state.get("dashboard_time_range", "Last 24h")
+        )
+        st.success("Preferences saved.")
+        if client and user_id:
+            try:
+                client.table("profiles").upsert(
+                    {
+                        "user_id": user_id,
+                        "default_time_range": pref_time_range,
+                        "timezone": pref_timezone,
+                        "units": pref_units,
+                        "email_notifications": pref_email,
+                    }
+                ).execute()
+            except Exception:  # pragma: no cover - best-effort persistence
+                st.info("Preferences saved locally. Sync to Supabase when available.")
+
+    st.divider()
+    st.subheader("API Keys")
+    api_keys = st.session_state.get("api_keys")
+    if isinstance(api_keys, (list, tuple)):
+        st.caption(f"Keys available: {len(api_keys)}")
+    else:
+        st.caption("Keys managed on API Keys page.")
+    if st.button("Manage API Keys", key="settings_manage_api_keys"):
+        st.info("Navigate to the API Keys page to manage keys.")
+
+    st.divider()
+    st.subheader("Plan & Billing")
+    st.write("Current plan: Free")
+    st.button("Upgrade", disabled=True, help="Coming soon")
+
+    st.divider()
+    st.subheader("Support")
+    support_category = st.selectbox(
+        "Category",
+        ["Issue", "Billing", "Feature Request", "Other"],
+        key="support_category",
+    )
+    support_message = st.text_area("Message", key="support_message")
+    if st.button("Report an issue", key="support_submit"):
+        if not support_message.strip():
+            st.error("Please enter a message.")
+        else:
+            ticket = {
+                "user_id": user_id,
+                "category": support_category,
+                "message": support_message.strip(),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            }
+            st.session_state.support_tickets.append(ticket)
+            st.success("Thanks for letting us know.")
+            if client and user_id:
+                try:
+                    client.table("support_tickets").insert(ticket).execute()
+                except Exception:  # pragma: no cover - best-effort persistence
+                    st.info("Stored locally. Sync to Supabase when available.")
+
+    st.divider()
+    st.subheader("Legal & Data")
+    st.caption("We store only account data and API keys. Telemetry stays on your side.")
 
 
 # --- MAIN NAVIGATION ---
