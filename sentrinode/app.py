@@ -696,7 +696,6 @@ def render_auth_portal() -> None:
         show_login(client)
     with tab_signup:
         show_signup(client)
-    _render_registration_status()
     st.stop()
 
 
