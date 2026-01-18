@@ -28,7 +28,7 @@ st.set_page_config(layout="wide")
 #                    (:Node)-[:EMITS]->(:Metric),
 #                    (:Incident)-[:AFFECTS]->(:Node),
 #                    (:Alert)-[:ON_NODE]->(:Node)
-# Time properties are expected as epoch millis or Neo4j datetime objects.
+# Time properties are expected as epoch millis or datetime objects.
 # TODO: refine the inventory after running SCHEMA_DISCOVERY_QUERIES.
 # ---------------------------------------------------------------------------
 
@@ -787,7 +787,7 @@ def _render_boards(filters: FilterContext, top_lists: dict[str, pd.DataFrame]) -
 
     with board_tabs[4]:
         st.markdown("##### Change Board")
-        st.info("TODO: integrate deployment/config change data from Neo4j (e.g., :Deployment nodes).")
+        st.info("TODO: integrate deployment/config change data when available.")
 
 
 def _generate_alerts(filters: FilterContext) -> list[dict[str, str]]:
