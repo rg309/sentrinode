@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5.17
+    container_name: sentrinode-neo4j
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
+    volumes:
+      - ./neo4j_data:/data
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+  sentrinode-agent:
+    image: otel/opentelemetry-collector-contrib:0.94.0
+    container_name: sentrinode-agent
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "14268:14268"
+    restart: unless-stopped
+
+  sentrinode-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sentrinode-ui
+    depends_on:
+      - sentrinode-agent
+      - neo4j
+    env_file:
+      - .env
+    environment:
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      LICENSE_SERIAL: ${LICENSE_SERIAL}
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
