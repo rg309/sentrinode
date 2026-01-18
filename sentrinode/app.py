@@ -836,14 +836,7 @@ def _generate_alerts(filters: FilterContext) -> list[dict[str, str]]:
 
 def _render_alerts(filters: FilterContext) -> None:
     st.subheader("Alerts & Anomalies")
-    alerts = _generate_alerts(filters)
-    if not alerts:
-        st.success("No active alerts detected.")
-        return
-    for alert in alerts:
-        st.error(
-            f"[{alert['severity'].upper()}] {alert['title']}\n\n{alert['detail']}\n\nNext action: {alert['suggestion']}"
-        )
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, Any]:
