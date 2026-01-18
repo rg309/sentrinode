@@ -7,8 +7,6 @@ from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
-from neo4j import GraphDatabase
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from supabase import Client, create_client
 
 try:
@@ -30,7 +28,7 @@ st.set_page_config(layout="wide")
 #                    (:Node)-[:EMITS]->(:Metric),
 #                    (:Incident)-[:AFFECTS]->(:Node),
 #                    (:Alert)-[:ON_NODE]->(:Node)
-# Time properties are expected as epoch millis or Neo4j datetime objects.
+# Time properties are expected as epoch millis or datetime objects.
 # TODO: refine the inventory after running SCHEMA_DISCOVERY_QUERIES.
 # ---------------------------------------------------------------------------
 
@@ -267,16 +265,7 @@ RETURN coalesce(n.name,'Unnamed') AS name,
 
 
 def _neo4j_driver():
-    try:
-        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        user = os.getenv("NEO4J_USER", "neo4j")
-        pwd = os.getenv("NEO4J_PASSWORD")
-        if not pwd:
-            return None
-        return GraphDatabase.driver(uri, auth=(user, pwd))
-    except Exception as exc:
-        st.warning(f"Neo4j connect failed: {exc}")
-        return None
+    return None
 
 
 def _supabase_client() -> Client | None:
@@ -292,81 +281,13 @@ def _supabase_client() -> Client | None:
 
 
 def _neo4j_username_exists(user: str) -> tuple[bool, str | None]:
-    driver = _neo4j_driver()
-    if not driver:
-        return False, "Unable to connect to SentriNode network."
-    try:
-        with driver.session() as session:
-            record = session.run(
-                "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
-                user=(user or "").strip(),
-            ).single()
-        return bool(record), None
-    except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-        return False, str(exc)
-    finally:
-        driver.close()
+    return False, None
 
 
 def _run_registration(show_spinner: bool = True) -> None:
-    payload = st.session_state.get("pending_registration")
-    if not payload:
-        return
-    username = (payload.get("username") or "").strip()
-    if not username:
-        st.session_state.registration_error = "Missing username for registration."
-        st.session_state.node_registered = False
-        return
-
-    def _execute() -> tuple[bool, str | None]:
-        driver = _neo4j_driver()
-        if not driver:
-            return False, "Unable to connect to SentriNode network."
-        try:
-            with driver.session() as session:
-                existing = session.run(
-                    "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
-                    user=username,
-                ).single()
-                if existing:
-                    if payload.get("mode") == "signup":
-                        return False, "Username already taken."
-                    return True, None
-                session.run(
-                    """
-                    CREATE (u:User {
-                        username:$user,
-                        email:$email,
-                        password:$password,
-                        role:'user',
-                        created_at:timestamp()
-                    })
-                    """,
-                    user=username,
-                    email=payload.get("email") or username,
-                    password=payload.get("password") or "",
-                )
-                return True, None
-        except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-            return False, str(exc)
-        finally:
-            driver.close()
-
-    if show_spinner:
-        with st.spinner("Registering node with Neo4j..."):
-            success, error = _execute()
-    else:
-        success, error = _execute()
-
-    if success:
-        st.session_state.node_registered = True
-        st.session_state.registration_error = None
-        st.session_state.pending_registration = None
-        st.toast("Node registration complete.", icon="🛰️")
-        st.rerun()
-    else:
-        st.session_state.node_registered = False
-        st.session_state.registration_error = error or "Registration failed."
+    st.session_state.node_registered = True
+    st.session_state.registration_error = None
+    st.session_state.pending_registration = None
 
 
 def _start_registration_flow(username: str, email: str, password: str, mode: str) -> None:
@@ -419,23 +340,7 @@ def is_strong_password(pw: str) -> tuple[bool, str]:
 
 
 def _resolve_user_role(username: str) -> str:
-    role = st.session_state.get("user_role", "user")
-    driver = _neo4j_driver()
-    if not driver:
-        return role
-    try:
-        with driver.session() as session:
-            record = session.run(
-                "MATCH (u:User {username:$username}) RETURN coalesce(u.role,'user') AS role LIMIT 1",
-                username=username,
-            ).single()
-        if record and record["role"]:
-            role = record["role"]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        pass
-    finally:
-        driver.close()
-    return role
+    return st.session_state.get("user_role", "user")
 
 
 @dataclass
@@ -451,19 +356,7 @@ class FilterContext:
 
 @st.cache_data(ttl=60)
 def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    params = params or {}
-    try:
-        with driver.session() as session:
-            result = session.run(query, **params)
-            return [dict(record) for record in result]
-    except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-        st.warning(f"Neo4j query failed: {exc}")
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def _sidebar_filters(container=None) -> FilterContext:
@@ -600,16 +493,7 @@ def show_signup(client: Client | None = None) -> None:
 
 
 def _render_registration_status() -> None:
-    if not st.session_state.get("user"):
-        return
-    if st.session_state.get("registration_error"):
-        st.error(f"Neo4j registration failed: {st.session_state['registration_error']}")
-        if st.session_state.get("pending_registration") and st.button(
-            "Retry registration", key="retry_registration_btn"
-        ):
-            _run_registration(show_spinner=True)
-    elif not st.session_state.get("node_registered"):
-        st.info("Authenticated. Completing Neo4j registration...")
+    return
 
 
 def render_auth_portal() -> None:
@@ -630,91 +514,17 @@ def render_auth_portal() -> None:
 
 def authenticate_user(username: str, password: str) -> tuple[bool, str | None]:
     """Legacy compatibility hook – retained for backward compat, not used."""
-    username = (username or "").strip()
-    password = password or ""
-    if not username or not password:
+    if not (username and password):
         return False, None
-    driver = _neo4j_driver()
-    if not driver:
-        return False, None
-    try:
-        with driver.session() as session:
-            record = session.run(
-                """
-                MATCH (u:User {username:$username})
-                WHERE coalesce(u.password, '') = $password
-                RETURN coalesce(u.role, 'user') AS role
-                """,
-                username=username,
-                password=password,
-            ).single()
-        if record:
-            return True, record["role"]
-        return False, None
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False, None
-    finally:
-        driver.close()
+    return False, None
 
 
 def fetch_user_nodes(username: str) -> list[dict[str, object]]:
-    username = (username or "").strip()
-    if not username:
-        return []
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    try:
-        with driver.session() as session:
-            records = session.run(
-                """
-                MATCH (u:User {username:$username})-[:OWNS|MONITORS]->(n)
-                RETURN coalesce(n.name, n.id) AS node,
-                       coalesce(n.status, 'online') AS status,
-                       coalesce(n.latency_ms, 0) AS latency
-                LIMIT 15
-                """,
-                username=username,
-            )
-        return [
-            {"Node": record["node"], "Status": record["status"], "Latency (ms)": record["latency"]}
-            for record in records
-        ]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def fetch_all_nodes() -> list[dict[str, object]]:
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    try:
-        with driver.session() as session:
-            records = session.run(
-                """
-                MATCH (n:Node)
-                RETURN coalesce(n.name, n.id) AS name,
-                       coalesce(n.status, 'online') AS status,
-                       coalesce(n.ip_address, n.ip, '10.0.0.1') AS ip,
-                       coalesce(toString(n.last_heartbeat), 'unsynced') AS heartbeat
-                LIMIT 100
-                """
-            )
-        return [
-            {
-                "Node Name": record["name"],
-                "Status": record["status"],
-                "IP Address": record["ip"],
-                "Last Heartbeat": record["heartbeat"],
-            }
-            for record in records
-        ]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def _fetch_global_kpis(filters: FilterContext) -> MetricsPayload:
@@ -783,62 +593,19 @@ def render_hero(text: str) -> None:
 
 # --- SCHEMA INVENTORY PANEL ---
 def render_schema_inventory() -> None:
-    with st.expander("Schema Inventory", expanded=False):
-        st.write("Discovery queries executed at runtime:")
-        st.code("\n".join(SCHEMA_DISCOVERY_QUERIES), language="cypher")
-        labels = _run_cypher("CALL db.labels()")
-        rels = _run_cypher("CALL db.relationshipTypes()")
-        node_props = _run_cypher("CALL db.schema.nodeTypeProperties()")
-        rel_props = _run_cypher("CALL db.schema.relTypeProperties()")
-        inventory = {
-            "labels": labels,
-            "relationships": rels,
-            "node_properties": node_props,
-            "relationship_properties": rel_props,
-        }
-        st.json(inventory, expanded=False)
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 # --- UI LOGIC ---
 
 
 def render_admin_dashboard() -> None:
-    filters = _sidebar_filters()
-    st.caption(
-        f"Window: {filters.since.isoformat()} ➝ {filters.until.isoformat()} | Search: {filters.search or '—'}"
-    )
-    kpis = _fetch_global_kpis(filters)
-    _render_kpi_tiles(kpis)
-    df_ts = _fetch_time_series(filters)
-    _render_time_series(df_ts)
-    top_lists = _fetch_top_lists(filters)
-    _render_top_lists(top_lists)
-    _render_graph_overview(filters)
-    node_health_df = _render_node_health(filters)
-    _render_boards(filters, top_lists)
-    _render_alerts(filters)
-    _render_node_drilldown(filters)
-    if st.session_state.get("export_json") and not node_health_df.empty:
-        st.download_button(
-            "Download Selected Node Metrics (JSON)",
-            json.dumps(node_health_df.to_dict(orient="records")[:20], default=str),
-            "node_metrics.json",
-            mime="application/json",
-        )
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def render_user_dashboard(username: str) -> None:
     st.caption("Personal Node Status")
-    with st.spinner("Syncing with SentriNode Network..."):
-        nodes = fetch_user_nodes(username)
-    summary_cols = st.columns(2)
-    summary_cols[0].metric("Assigned Nodes", len(nodes))
-    offline = sum(1 for node in nodes if str(node["Status"]).lower() not in ("online", "healthy"))
-    summary_cols[1].metric("Alerts", offline)
-    if nodes:
-        st.table(pd.DataFrame(nodes))
-    else:
-        st.info("No assigned nodes yet. Provision a node to begin monitoring.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
@@ -913,153 +680,18 @@ def _render_top_lists(data: dict[str, pd.DataFrame]) -> None:
 
 def _render_graph_overview(filters: FilterContext) -> None:
     st.subheader("Graph Overview")
-    render_schema_inventory()
-    label_counts = _run_cypher("CALL db.labels() YIELD label RETURN label, count(*) AS count")
-    rel_counts = _run_cypher("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
-    col1, col2 = st.columns(2)
-    with col1:
-        if label_counts:
-            st.table(pd.DataFrame(label_counts))
-        else:
-            st.info("No label data available.")
-    with col2:
-        if rel_counts:
-            st.table(pd.DataFrame(rel_counts))
-        else:
-            st.info("No relationship data available.")
-
-    rows = _run_cypher(GRAPH_SAMPLE_QUERY, _time_params(filters))
-    if rows and agraph and Node and Edge and Config:
-        nodes_map: dict[str, Node] = {}
-        edges: list[Edge] = []
-        for row in rows:
-            start = row["n"]
-            end = row["m"]
-            rel = row["r"]
-            for entity in (start, end):
-                if entity.id not in nodes_map:
-                    nodes_map[entity.id] = Node(
-                        id=str(entity.id),
-                        label=str(entity.get("name", f"node-{entity.id}")),
-                        size=18,
-                        color="#60a5fa",
-                    )
-            edges.append(
-                Edge(
-                    source=str(start.id),
-                    target=str(end.id),
-                    title=rel.type,
-                    color="#f97316",
-                )
-            )
-        st.markdown("#### Sample Topology")
-        config = Config(height=420, width=1000, directed=True, physics=True)
-        agraph(list(nodes_map.values()), edges, config)
-    else:
-        st.info("Graph visualization unavailable (no data or streamlit-agraph missing).")
-    st.markdown("#### Graph Explorer")
-    search_node = st.text_input("Explore node (exact match or leave blank)", key="graph_focus")
-    params = _time_params(filters)
-    params["node_name"] = (search_node or "").strip()
-    subgraph_rows = _run_cypher(SUBGRAPH_QUERY, params)
-    adjacency: list[dict[str, str]] = []
-    if subgraph_rows and agraph and Node and Edge and Config:
-        graph_nodes: dict[str, Node] = {}
-        graph_edges: list[Edge] = []
-        for row in subgraph_rows:
-            for n in row["nodes"]:
-                if n.id not in graph_nodes:
-                    graph_nodes[n.id] = Node(
-                        id=str(n.id),
-                        label=str(n.get("name", f"node-{n.id}")),
-                        size=20,
-                        color="#4ade80" if (search_node and str(n.get("name","")).lower() == search_node.lower()) else "#a855f7",
-                    )
-            for rel in row["rels"]:
-                graph_edges.append(
-                    Edge(
-                        source=str(rel.start_node.id),
-                        target=str(rel.end_node.id),
-                        title=rel.type,
-                        color="#facc15",
-                    )
-                )
-                adjacency.append(
-                    {
-                        "source": rel.start_node.get("name", rel.start_node.id),
-                        "relation": rel.type,
-                        "target": rel.end_node.get("name", rel.end_node.id),
-                    }
-                )
-        if graph_nodes:
-            config = Config(height=480, width=1000, directed=True, physics=True)
-            agraph(list(graph_nodes.values()), graph_edges, config)
-    if adjacency:
-        st.dataframe(pd.DataFrame(adjacency), hide_index=True, use_container_width=True)
-        if st.button("Export Subgraph CSV"):
-            csv = pd.DataFrame(adjacency).to_csv(index=False)
-            st.download_button("Download Adjacency", csv, "subgraph.csv", mime="text/csv")
-    else:
-        st.info("No subgraph data available for current selection.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _render_node_health(filters: FilterContext) -> pd.DataFrame:
     st.subheader("Node Health")
-    df = pd.DataFrame(_run_cypher(NODE_HEALTH_QUERY, _time_params(filters)))
-    if df.empty:
-        st.info("No node health data.")
-        return df
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    if st.session_state.get("export_csv") and not df.empty:
-        st.download_button(
-            "Download Node Health CSV", df.to_csv(index=False), "node_health.csv", mime="text/csv"
-        )
-    selection = st.selectbox(
-        "Focus node for drilldown",
-        [""] + df["name"].astype(str).tolist(),
-        key="node_health_focus",
-    )
-    if selection:
-        st.session_state.selected_node = selection
-        st.toast(f"Drilldown focus set to {selection}", icon="🔎")
-    return df
+    st.info("Temporarily disabled while storage is being migrated.")
+    return pd.DataFrame()
 
 
 def _render_boards(filters: FilterContext, top_lists: dict[str, pd.DataFrame]) -> None:
     st.subheader("SentriNode Boards")
-    board_tabs = st.tabs(["Reliability", "Performance", "Cost", "Security", "Change"])
-
-    with board_tabs[0]:
-        st.markdown("##### Reliability Board")
-        incidents_df = top_lists.get("incidents") or pd.DataFrame()
-        st.write("Top incident drivers")
-        st.dataframe(incidents_df, hide_index=True, use_container_width=True)
-        st.write("MTTR (seconds)")
-        if not incidents_df.empty:
-            st.bar_chart(incidents_df.set_index("name")["mttr_seconds"])
-        else:
-            st.info("No incident data available. TODO: instrument incident writes.")
-
-    with board_tabs[1]:
-        st.markdown("##### Performance Board")
-        latency_df = top_lists.get("latency") or pd.DataFrame()
-        st.write("Top latency outliers")
-        st.dataframe(latency_df, hide_index=True, use_container_width=True)
-
-    with board_tabs[2]:
-        st.markdown("##### Cost Board")
-        cost_df = top_lists.get("resources") or pd.DataFrame()
-        st.write("Resource usage proxy (CPU+Memory+Disk)")
-        st.dataframe(cost_df, hide_index=True, use_container_width=True)
-        st.caption("Cost proxy derived from average resource usage. TODO: replace with actual cost metrics.")
-
-    with board_tabs[3]:
-        st.markdown("##### Security Board")
-        st.info("TODO: surface auth failures or unusual patterns when available. Placeholder view.")
-
-    with board_tabs[4]:
-        st.markdown("##### Change Board")
-        st.info("TODO: integrate deployment/config change data from Neo4j (e.g., :Deployment nodes).")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _generate_alerts(filters: FilterContext) -> list[dict[str, str]]:
@@ -1108,14 +740,7 @@ def _generate_alerts(filters: FilterContext) -> list[dict[str, str]]:
 
 def _render_alerts(filters: FilterContext) -> None:
     st.subheader("Alerts & Anomalies")
-    alerts = _generate_alerts(filters)
-    if not alerts:
-        st.success("No active alerts detected.")
-        return
-    for alert in alerts:
-        st.error(
-            f"[{alert['severity'].upper()}] {alert['title']}\n\n{alert['detail']}\n\nNext action: {alert['suggestion']}"
-        )
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, Any]:
@@ -1167,53 +792,12 @@ def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, A
 
 def _render_node_drilldown(filters: FilterContext) -> None:
     st.subheader("Node Drilldown")
-    node_name = st.session_state.get("selected_node")
-    if not node_name:
-        st.info("Select a node from any table to drill down.")
-        return
-    payload = _fetch_node_drilldown(node_name, filters)
-    summary = payload["summary"][0] if payload["summary"] else None
-    if not summary:
-        st.warning(f"No details found for {node_name}.")
-        return
-    node_props = summary["node"]
-    dependencies = summary.get("dependencies", [])
-    st.markdown(f"### {node_props.get('name', node_name)}")
-    st.json(node_props)
-    if dependencies:
-        st.markdown("**Dependencies:** " + ", ".join(dependencies))
-    metrics_df = pd.DataFrame(payload["metrics"])
-    if not metrics_df.empty:
-        metrics_df["timestamp"] = pd.to_datetime(metrics_df["timestamp"])
-        st.line_chart(metrics_df.set_index("timestamp")[["latency_p95", "error_rate"]])
-    incidents_df = pd.DataFrame(payload["incidents"])
-    if not incidents_df.empty:
-        st.markdown("#### Recent Incidents")
-        st.dataframe(incidents_df, use_container_width=True, hide_index=True)
-    if payload["alerts"]:
-        st.markdown("#### Alerts")
-        for alert in payload["alerts"]:
-            st.error(f"{alert['title']} - {alert['detail']}")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    search = st.text_input("Search Nodes", placeholder="Filter by node name")
-    with st.spinner("Syncing with SentriNode Network..."):
-        nodes = fetch_all_nodes()
-    if search:
-        nodes = [node for node in nodes if search.lower() in str(node["Node Name"]).lower()]
-    if nodes:
-        st.dataframe(pd.DataFrame(nodes), use_container_width=True, hide_index=True)
-        st.subheader("Actions")
-        for node in nodes:
-            cols = st.columns([3, 1])
-            cols[0].markdown(f"**{node['Node Name']}** · {node['Status']} · {node['IP Address']}")
-            if cols[1].button("Reboot Node", key=f"reboot-{node['Node Name']}"):
-                st.success(f"Reboot signal sent to {node['Node Name']}.")
-                st.toast(f"{node['Node Name']} reboot requested.", icon="♻️")
-    else:
-        st.info("No nodes to display. Check your connections or adjust the filter.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def show_dashboard():
@@ -1230,123 +814,20 @@ def show_dashboard():
 
 # --- SETTINGS LOGIC ---
 def _update_user_profile(username: str, full_name: str, email: str) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with driver.session() as session:
-            session.run(
-                """
-                MATCH (u:User {username:$username})
-                SET u.full_name = $full_name,
-                    u.notification_email = $email
-                """,
-                username=username,
-                full_name=full_name.strip(),
-                email=email.strip(),
-            )
-        return True
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
+    return False
 
 
 def _update_user_preferences(username: str, theme: str, desktop_notifications: bool) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with driver.session() as session:
-            session.run(
-                """
-                MATCH (u:User {username:$username})
-                SET u.system_theme = $theme,
-                    u.desktop_notifications = $notify
-                """,
-                username=username,
-                theme=theme,
-                notify=desktop_notifications,
-            )
-        return True
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
+    return False
 
 
 def _change_password(username: str, old_password: str, new_password: str) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with driver.session() as session:
-            record = session.run(
-                """
-                MATCH (u:User {username:$username})
-                WHERE coalesce(u.password, '') = $old
-                SET u.password = $new
-                RETURN u.username AS username
-                """,
-                username=username,
-                old=old_password,
-                new=new_password,
-            ).single()
-        return bool(record)
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
+    return False
 
 
 def show_settings():
-    username = st.session_state.get("username") or ""
     st.header("Account Settings")
-    with st.form("profile_form"):
-        full_name = st.text_input("Full Name")
-        email = st.text_input("Notification Email")
-        submitted = st.form_submit_button("Save Profile")
-        if submitted:
-            with st.spinner("Syncing with SentriNode Network..."):
-                ok = _update_user_profile(username, full_name, email)
-            if ok:
-                st.success("Profile updated.")
-                st.toast("Profile saved.", icon="✅")
-            else:
-                st.error("Unable to update profile.")
-
-    st.divider()
-    st.subheader("Preferences")
-    themes = ["Auto", "Night Ops", "Day Ops"]
-    theme = st.selectbox("System Theme", themes)
-    desktop_notifications = st.checkbox("Enable Desktop Notifications")
-    if st.button("Save Preferences"):
-        with st.spinner("Syncing with SentriNode Network..."):
-            ok = _update_user_preferences(username, theme, desktop_notifications)
-        if ok:
-            st.success("Preferences saved.")
-            st.toast("Preferences updated.", icon="⚙️")
-        else:
-            st.error("Unable to save preferences.")
-
-    st.divider()
-    st.subheader("Security")
-    with st.form("password_form"):
-        old_password = st.text_input("Current Password", type="password")
-        new_password = st.text_input("New Password", type="password")
-        confirm_password = st.text_input("Confirm New Password", type="password")
-        change = st.form_submit_button("Change Password")
-        if change:
-            if not new_password or new_password != confirm_password:
-                st.error("Passwords do not match.")
-            else:
-                with st.spinner("Syncing with SentriNode Network..."):
-                    ok = _change_password(username, old_password, new_password)
-                if ok:
-                    st.success("Password updated.")
-                    st.toast("Credentials rotated.", icon="🔐")
-                else:
-                    st.error("Unable to update password. Check your current password.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 # --- MAIN NAVIGATION ---
