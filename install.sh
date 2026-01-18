@@ -75,6 +75,9 @@ prompt_with_default() {
 }
 
 # Defaults for local docker compose networking
+if [[ "${NEO4J_URI:-}" == *"railway.internal"* ]] || [[ "${NEO4J_URI:-}" == *'${'* ]] || [[ "${NEO4J_URI:-}" == NEO4J_URI=* ]]; then
+  unset NEO4J_URI
+fi
 NEO4J_URI="${NEO4J_URI:-bolt://neo4j:7687}"
 NEO4J_URI="$(prompt_with_default "Enter Neo4j Bolt URI" "$NEO4J_URI")"
 NEO4J_URI="${NEO4J_URI%/}"
