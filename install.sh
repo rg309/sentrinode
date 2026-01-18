@@ -75,10 +75,8 @@ prompt_with_default() {
 }
 
 # Defaults for local docker compose networking
-NEO4J_URI="${NEO4J_URI:-}"
-if [[ -z "$NEO4J_URI" ]]; then
-  NEO4J_URI="$(prompt_with_default "Enter Neo4j Bolt URI" "bolt://neo4j:7687")"
-fi
+NEO4J_URI="${NEO4J_URI:-bolt://neo4j:7687}"
+NEO4J_URI="$(prompt_with_default "Enter Neo4j Bolt URI" "$NEO4J_URI")"
 NEO4J_URI="${NEO4J_URI%/}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
 
