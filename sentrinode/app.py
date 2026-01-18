@@ -95,6 +95,8 @@ if "neo4j_ok" not in st.session_state:
     st.session_state.neo4j_ok = False
 if "neo4j_last_error" not in st.session_state:
     st.session_state.neo4j_last_error = None
+if "registration_attempted" not in st.session_state:
+    st.session_state.registration_attempted = False
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -421,6 +423,7 @@ def _run_registration(show_spinner: bool = True) -> None:
         st.session_state.pending_registration = None
         st.session_state.neo4j_ok = True
         st.session_state.neo4j_last_error = None
+        st.session_state.registration_attempted = True
         st.toast("Node registration complete.", icon="🛰️")
         print(f"Neo4j registration completed for user '{username}'")
         st.rerun()
@@ -429,10 +432,11 @@ def _run_registration(show_spinner: bool = True) -> None:
         st.session_state.registration_error = (
             error or st.session_state.get("neo4j_last_error") or "Registration failed."
         )
+        st.session_state.registration_attempted = True
         print(f"Neo4j registration failed: {st.session_state.registration_error}")
 
 
-def _start_registration_flow(username: str, email: str, password: str, mode: str) -> None:
+def _start_registration_flow(username: str, email: str, password: str, mode: str, *, run_immediately: bool = True) -> None:
     st.session_state.pending_registration = {
         "username": (username or "").strip(),
         "email": (email or "").strip(),
@@ -443,7 +447,9 @@ def _start_registration_flow(username: str, email: str, password: str, mode: str
     st.session_state.node_registered = False
     st.session_state.neo4j_ok = False
     st.session_state.neo4j_last_error = None
-    _run_registration(show_spinner=True)
+    st.session_state.registration_attempted = False
+    if run_immediately:
+        _run_registration(show_spinner=True)
 
 
 def _handle_auth_success(
@@ -466,7 +472,7 @@ def _handle_auth_success(
     st.session_state.user_role = _resolve_user_role(username)
     message = toast_message or ("Console unlocked. Welcome back." if mode == "login" else "Account created and signed in.")
     st.toast(message, icon=toast_icon)
-    _start_registration_flow(username, resolved_email, password, mode)
+    _start_registration_flow(username, resolved_email, password, mode, run_immediately=False)
 
 
 def is_strong_password(pw: str) -> tuple[bool, str]:
@@ -682,6 +688,13 @@ def _render_registration_status() -> None:
             _run_registration(show_spinner=True)
     elif not st.session_state.get("node_registered"):
         st.info("Authenticated. Completing Neo4j registration...")
+    if (
+        st.session_state.get("user")
+        and st.session_state.get("pending_registration")
+        and not st.session_state.get("node_registered")
+        and not st.session_state.get("registration_attempted")
+    ):
+        _run_registration(show_spinner=False)
 
 
 def render_auth_portal() -> None:
