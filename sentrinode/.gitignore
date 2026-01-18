@@ -1,0 +1,58 @@
+# --- Secrets & Config ---
+.env
+.env.local
+secrets.json
+*.pem
+credentials.md
+
+# --- Database (Neo4j) ---
+# Ignore local data if you run Neo4j Desktop
+data/
+logs/
+transactions/
+dbms/
+certificates/
+
+# --- OpenTelemetry ---
+# Ignore any local collector logs
+otel-collector.log
+
+# --- Backend Languages ---
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Go
+bin/
+dist/
+/vendor/
+
+# --- Services & Large Data Files ---
+# Exclude services directory to prevent terminal freezes during Git operations
+services/
+# Large data files
+*.pkl
+*.csv
+*.db
+*.id
+*.log
+neo4j_data/
+export.csv
+training_data.csv
+latency_model_*.pkl
+load_encoder_*.pkl
+service_encoder_*.pkl
+
+# --- OS & Editors ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
