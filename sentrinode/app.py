@@ -1,15 +1,12 @@
 import json
 import os
 import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
-from neo4j import GraphDatabase
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from supabase import Client, create_client
 
 try:
@@ -85,22 +82,11 @@ if "access_token" not in st.session_state:
     st.session_state.access_token = None
 if "selected_node" not in st.session_state:
     st.session_state.selected_node = None
-if "node_registered" not in st.session_state:
-    st.session_state.node_registered = False
-if "registration_error" not in st.session_state:
-    st.session_state.registration_error = None
-if "pending_registration" not in st.session_state:
-    st.session_state.pending_registration = None
-if "neo4j_ok" not in st.session_state:
-    st.session_state.neo4j_ok = False
-if "neo4j_last_error" not in st.session_state:
-    st.session_state.neo4j_last_error = None
 if "registration_attempted" not in st.session_state:
     st.session_state.registration_attempted = False
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-NEO4J_DATABASE = os.getenv("NEO4J_DATABASE")
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
@@ -264,52 +250,13 @@ LIMIT 10
 """
 
 ALERT_SOURCE_QUERY = """
-MATCH (n:Node)
-OPTIONAL MATCH (n)-[:EMITS]->(m:Metric)
+MATCH (m:Metric)-[:RECORDED_FOR]->(n:Node)
 WHERE coalesce(m.timestamp, datetime({epochMillis:0})) >= datetime({epochMillis:$since_epoch})
 RETURN coalesce(n.name,'Unnamed') AS name,
-       coalesce(n.last_heartbeat, datetime({epochMillis:0})) AS last_seen,
+       coalesce(m.timestamp, datetime({epochMillis:0})) AS last_seen,
        avg(m.error_rate) AS error_rate,
        avg(m.latency_p95) AS latency_p95
 """
-
-
-def _neo4j_driver():
-    uri = os.getenv("NEO4J_URI") or "bolt://localhost:7687"
-    user = os.getenv("NEO4J_USER", "neo4j")
-    pwd = os.getenv("NEO4J_PASSWORD")
-    if not pwd:
-        st.warning("NEO4J_PASSWORD is not set; unable to connect to Neo4j.")
-        print("[neo4j] missing NEO4J_PASSWORD; cannot create driver")
-        st.session_state.neo4j_ok = False
-        st.session_state.neo4j_last_error = "NEO4J_PASSWORD not set"
-        return None
-    last_error = None
-    for attempt in range(1, 11):
-        try:
-            driver = GraphDatabase.driver(uri, auth=(user, pwd))
-            driver.verify_connectivity()
-            if NEO4J_DATABASE:
-                with driver.session(database=NEO4J_DATABASE) as session:
-                    session.run("RETURN 1 AS ok").single()
-            st.session_state.neo4j_ok = True
-            st.session_state.neo4j_last_error = None
-            return driver
-        except Exception as exc:
-            last_error = str(exc)
-            st.session_state.neo4j_ok = False
-            st.session_state.neo4j_last_error = last_error
-            if attempt < 10:
-                time.sleep(1.0)
-    message = f"Neo4j connect failed ({uri}): {last_error}"
-    print(message)
-    return None
-
-
-def _neo4j_session(driver):
-    if NEO4J_DATABASE:
-        return driver.session(database=NEO4J_DATABASE)
-    return driver.session()
 
 
 def _supabase_client() -> Client | None:
@@ -322,134 +269,6 @@ def _supabase_client() -> Client | None:
             return None
         _supabase_client_instance = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     return _supabase_client_instance
-
-
-def _neo4j_username_exists(user: str) -> tuple[bool, str | None]:
-    if st.session_state.get("neo4j_ok") is False and st.session_state.get("neo4j_last_error"):
-        return False, None
-    driver = _neo4j_driver()
-    if not driver:
-        st.session_state.neo4j_ok = False
-        st.session_state.neo4j_last_error = st.session_state.get("neo4j_last_error") or "Unable to connect to Neo4j."
-        return False, None
-    try:
-        with _neo4j_session(driver) as session:
-            record = session.run(
-                "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
-                user=(user or "").strip(),
-            ).single()
-        return bool(record), None
-    except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-        st.session_state.neo4j_ok = False
-        st.session_state.neo4j_last_error = str(exc)
-        return False, None
-    finally:
-        driver.close()
-
-
-def _run_registration(show_spinner: bool = True) -> None:
-    payload = st.session_state.get("pending_registration")
-    if not payload:
-        return
-    username = (payload.get("username") or "").strip()
-    if not username:
-        st.session_state.registration_error = "Missing username for registration."
-        st.session_state.node_registered = False
-        return
-
-    def _execute() -> tuple[bool, str | None]:
-        driver = _neo4j_driver()
-        if not driver:
-            message = f"Unable to connect to Neo4j at {os.getenv('NEO4J_URI') or 'bolt://localhost:7687'}."
-            print(f"Neo4j registration failed: {message}")
-            st.session_state.neo4j_ok = False
-            st.session_state.neo4j_last_error = message
-            return False, None
-        try:
-            with _neo4j_session(driver) as session:
-                existing = session.run(
-                    "MATCH (u:User {username:$user}) RETURN u LIMIT 1",
-                    user=username,
-                ).single()
-                if existing:
-                    if payload.get("mode") == "signup":
-                        return False, "Username already taken."
-                    return True, None
-                session.run(
-                    """
-                    CREATE (u:User {
-                        username:$user,
-                        email:$email,
-                        password:$password,
-                        role:'user',
-                        created_at:timestamp()
-                    })
-                    """,
-                    user=username,
-                    email=payload.get("email") or username,
-                    password=payload.get("password") or "",
-                )
-                st.session_state.neo4j_ok = True
-                st.session_state.neo4j_last_error = None
-                return True, None
-        except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-            message = str(exc)
-            print(f"Neo4j registration failed: {message}")
-            st.session_state.neo4j_ok = False
-            st.session_state.neo4j_last_error = message
-            return False, None
-        finally:
-            driver.close()
-
-    def _execute_with_retries() -> tuple[bool, str | None]:
-        attempts = 10
-        delay_seconds = 1.0
-        for attempt in range(1, attempts + 1):
-            success, error = _execute()
-            if success or attempt == attempts:
-                return success, error
-            time.sleep(delay_seconds)
-        return False, "Registration failed."
-
-    if show_spinner:
-        with st.spinner("Registering node with Neo4j..."):
-            success, error = _execute_with_retries()
-    else:
-        success, error = _execute_with_retries()
-
-    if success:
-        st.session_state.node_registered = True
-        st.session_state.registration_error = None
-        st.session_state.pending_registration = None
-        st.session_state.neo4j_ok = True
-        st.session_state.neo4j_last_error = None
-        st.session_state.registration_attempted = True
-        st.toast("Node registration complete.", icon="🛰️")
-        print(f"Neo4j registration completed for user '{username}'")
-        st.rerun()
-    else:
-        st.session_state.node_registered = False
-        st.session_state.registration_error = (
-            error or st.session_state.get("neo4j_last_error") or "Registration failed."
-        )
-        st.session_state.registration_attempted = True
-        print(f"Neo4j registration failed: {st.session_state.registration_error}")
-
-
-def _start_registration_flow(username: str, email: str, password: str, mode: str, *, run_immediately: bool = True) -> None:
-    st.session_state.pending_registration = {
-        "username": (username or "").strip(),
-        "email": (email or "").strip(),
-        "password": password or "",
-        "mode": mode,
-    }
-    st.session_state.registration_error = None
-    st.session_state.node_registered = False
-    st.session_state.neo4j_ok = False
-    st.session_state.neo4j_last_error = None
-    st.session_state.registration_attempted = False
-    if run_immediately:
-        _run_registration(show_spinner=True)
 
 
 def _handle_auth_success(
@@ -469,10 +288,10 @@ def _handle_auth_success(
     st.session_state.username = username
     st.session_state.logged_in = True
     st.session_state.show_signup = False
-    st.session_state.user_role = _resolve_user_role(username)
+    st.session_state.user_role = "user"
     message = toast_message or ("Console unlocked. Welcome back." if mode == "login" else "Account created and signed in.")
     st.toast(message, icon=toast_icon)
-    _start_registration_flow(username, resolved_email, password, mode, run_immediately=False)
+    st.session_state.registration_attempted = True
 
 
 def is_strong_password(pw: str) -> tuple[bool, str]:
@@ -490,25 +309,7 @@ def is_strong_password(pw: str) -> tuple[bool, str]:
 
 
 def _resolve_user_role(username: str) -> str:
-    role = st.session_state.get("user_role", "user")
-    if st.session_state.get("neo4j_ok") is False:
-        return role
-    driver = _neo4j_driver()
-    if not driver:
-        return role
-    try:
-        with _neo4j_session(driver) as session:
-            record = session.run(
-                "MATCH (u:User {username:$username}) RETURN coalesce(u.role,'user') AS role LIMIT 1",
-                username=username,
-            ).single()
-        if record and record["role"]:
-            role = record["role"]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        pass
-    finally:
-        driver.close()
-    return role
+    return st.session_state.get("user_role", "user")
 
 
 @dataclass
@@ -524,23 +325,7 @@ class FilterContext:
 
 @st.cache_data(ttl=60)
 def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
-    if st.session_state.get("neo4j_ok") is False and st.session_state.get("neo4j_last_error"):
-        return []
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    params = params or {}
-    try:
-        with _neo4j_session(driver) as session:
-            result = session.run(query, **params)
-            return [dict(record) for record in result]
-    except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-        st.session_state.neo4j_ok = False
-        st.session_state.neo4j_last_error = str(exc)
-        st.warning(f"Neo4j query failed: {exc}")
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def _sidebar_filters(container=None) -> FilterContext:
@@ -648,13 +433,6 @@ def show_signup(client: Client | None = None) -> None:
             if not ok:
                 st.error(msg)
                 return
-            exists, exists_error = _neo4j_username_exists(username)
-            if exists_error:
-                st.error(exists_error)
-                return
-            if exists:
-                st.error("Username already taken.")
-                return
             with st.spinner("Syncing with SentriNode Network..."):
                 try:
                     res = client.auth.sign_up({"email": email, "password": pw1})
@@ -677,30 +455,12 @@ def show_signup(client: Client | None = None) -> None:
 
 
 def _render_registration_status() -> None:
-    if not st.session_state.get("user"):
-        return
-    error_msg = st.session_state.get("registration_error") or st.session_state.get("neo4j_last_error")
-    if not error_msg and st.session_state.get("neo4j_ok") is False:
-        error_msg = "Neo4j is unavailable."
-    if error_msg:
-        st.warning(f"Neo4j registration failed: {error_msg}")
-        if st.button("Retry Neo4j registration", key="retry_registration_btn"):
-            _run_registration(show_spinner=True)
-    elif not st.session_state.get("node_registered"):
-        st.info("Authenticated. Completing Neo4j registration...")
-    if (
-        st.session_state.get("user")
-        and st.session_state.get("pending_registration")
-        and not st.session_state.get("node_registered")
-        and not st.session_state.get("registration_attempted")
-    ):
-        _run_registration(show_spinner=False)
+    return
 
 
 def render_auth_portal() -> None:
     render_hero("SENTRINODE")
     st.title("SentriNode Console Access")
-    st.caption(f"NEO4J_URI: {os.getenv('NEO4J_URI') or 'unset'}")
     client = _supabase_client()
     if not client:
         st.error("Supabase credentials missing.")
@@ -715,91 +475,17 @@ def render_auth_portal() -> None:
 
 def authenticate_user(username: str, password: str) -> tuple[bool, str | None]:
     """Legacy compatibility hook – retained for backward compat, not used."""
-    username = (username or "").strip()
-    password = password or ""
-    if not username or not password:
+    if not (username and password):
         return False, None
-    driver = _neo4j_driver()
-    if not driver:
-        return False, None
-    try:
-        with _neo4j_session(driver) as session:
-            record = session.run(
-                """
-                MATCH (u:User {username:$username})
-                WHERE coalesce(u.password, '') = $password
-                RETURN coalesce(u.role, 'user') AS role
-                """,
-                username=username,
-                password=password,
-            ).single()
-        if record:
-            return True, record["role"]
-        return False, None
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False, None
-    finally:
-        driver.close()
+    return False, None
 
 
 def fetch_user_nodes(username: str) -> list[dict[str, object]]:
-    username = (username or "").strip()
-    if not username:
-        return []
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    try:
-        with _neo4j_session(driver) as session:
-            records = session.run(
-                """
-                MATCH (u:User {username:$username})-[:OWNS|MONITORS]->(n)
-                RETURN coalesce(n.name, n.id) AS node,
-                       coalesce(n.status, 'online') AS status,
-                       coalesce(n.latency_ms, 0) AS latency
-                LIMIT 15
-                """,
-                username=username,
-            )
-        return [
-            {"Node": record["node"], "Status": record["status"], "Latency (ms)": record["latency"]}
-            for record in records
-        ]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def fetch_all_nodes() -> list[dict[str, object]]:
-    driver = _neo4j_driver()
-    if not driver:
-        return []
-    try:
-        with _neo4j_session(driver) as session:
-            records = session.run(
-                """
-                MATCH (n:Node)
-                RETURN coalesce(n.name, n.id) AS name,
-                       coalesce(n.status, 'online') AS status,
-                       coalesce(n.ip_address, n.ip, '10.0.0.1') AS ip,
-                       coalesce(toString(n.last_heartbeat), 'unsynced') AS heartbeat
-                LIMIT 100
-                """
-            )
-        return [
-            {
-                "Node Name": record["name"],
-                "Status": record["status"],
-                "IP Address": record["ip"],
-                "Last Heartbeat": record["heartbeat"],
-            }
-            for record in records
-        ]
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return []
-    finally:
-        driver.close()
+    return []
 
 
 def _fetch_global_kpis(filters: FilterContext) -> MetricsPayload:
@@ -868,74 +554,19 @@ def render_hero(text: str) -> None:
 
 # --- SCHEMA INVENTORY PANEL ---
 def render_schema_inventory() -> None:
-    with st.expander("Schema Inventory", expanded=False):
-        st.write("Discovery queries executed at runtime:")
-        st.code("\n".join(SCHEMA_DISCOVERY_QUERIES), language="cypher")
-        labels = _run_cypher("CALL db.labels()")
-        rels = _run_cypher("CALL db.relationshipTypes()")
-        node_props = _run_cypher("CALL db.schema.nodeTypeProperties()")
-        rel_props = _run_cypher("CALL db.schema.relTypeProperties()")
-        inventory = {
-            "labels": labels,
-            "relationships": rels,
-            "node_properties": node_props,
-            "relationship_properties": rel_props,
-        }
-        st.json(inventory, expanded=False)
+    st.info("Graph inventory is temporarily disabled.")
 
 
 # --- UI LOGIC ---
 
 
 def render_admin_dashboard() -> None:
-    if st.session_state.get("neo4j_ok") is False:
-        st.info(
-            f"Neo4j unavailable. Dashboard data is disabled until registration succeeds. "
-            f"{st.session_state.get('neo4j_last_error') or ''}"
-        )
-        return
-    filters = _sidebar_filters()
-    st.caption(
-        f"Window: {filters.since.isoformat()} ➝ {filters.until.isoformat()} | Search: {filters.search or '—'}"
-    )
-    kpis = _fetch_global_kpis(filters)
-    _render_kpi_tiles(kpis)
-    df_ts = _fetch_time_series(filters)
-    _render_time_series(df_ts)
-    top_lists = _fetch_top_lists(filters)
-    _render_top_lists(top_lists)
-    _render_graph_overview(filters)
-    node_health_df = _render_node_health(filters)
-    _render_boards(filters, top_lists)
-    _render_alerts(filters)
-    _render_node_drilldown(filters)
-    if st.session_state.get("export_json") and not node_health_df.empty:
-        st.download_button(
-            "Download Selected Node Metrics (JSON)",
-            json.dumps(node_health_df.to_dict(orient="records")[:20], default=str),
-            "node_metrics.json",
-            mime="application/json",
-        )
+    st.info("Admin dashboards are temporarily disabled while graph data is offline.")
 
 
 def render_user_dashboard(username: str) -> None:
     st.caption("Personal Node Status")
-    if st.session_state.get("neo4j_ok") is False:
-        st.info(
-            f"Neo4j unavailable. Node status is paused until registration succeeds. "
-            f"{st.session_state.get('neo4j_last_error') or ''}"
-        )
-        return
-    with st.spinner("Syncing with SentriNode Network..."):
-        nodes = fetch_user_nodes(username)
-    summary_cols = st.columns(2)
-    summary_cols[0].metric("Assigned Nodes", len(nodes))
-    offline = sum(1 for node in nodes if str(node["Status"]).lower() not in ("online", "healthy"))
-    summary_cols[1].metric("Alerts", offline)
-    if nodes:
-        st.table(pd.DataFrame(nodes))
-    else:
-        st.info("No assigned nodes yet. Provision a node to begin monitoring.")
+    st.info("Node status is temporarily disabled while graph data is offline.")
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
@@ -1264,65 +895,12 @@ def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, A
 
 def _render_node_drilldown(filters: FilterContext) -> None:
     st.subheader("Node Drilldown")
-    if st.session_state.get("neo4j_ok") is False:
-        st.info(
-            f"Neo4j unavailable. Drilldown is disabled until registration succeeds. "
-            f"{st.session_state.get('neo4j_last_error') or ''}"
-        )
-        return
-    node_name = st.session_state.get("selected_node")
-    if not node_name:
-        st.info("Select a node from any table to drill down.")
-        return
-    payload = _fetch_node_drilldown(node_name, filters)
-    summary = payload["summary"][0] if payload["summary"] else None
-    if not summary:
-        st.warning(f"No details found for {node_name}.")
-        return
-    node_props = summary["node"]
-    dependencies = summary.get("dependencies", [])
-    st.markdown(f"### {node_props.get('name', node_name)}")
-    st.json(node_props)
-    if dependencies:
-        st.markdown("**Dependencies:** " + ", ".join(dependencies))
-    metrics_df = pd.DataFrame(payload["metrics"])
-    if not metrics_df.empty:
-        metrics_df["timestamp"] = pd.to_datetime(metrics_df["timestamp"])
-        st.line_chart(metrics_df.set_index("timestamp")[["latency_p95", "error_rate"]])
-    incidents_df = pd.DataFrame(payload["incidents"])
-    if not incidents_df.empty:
-        st.markdown("#### Recent Incidents")
-        st.dataframe(incidents_df, use_container_width=True, hide_index=True)
-    if payload["alerts"]:
-        st.markdown("#### Alerts")
-        for alert in payload["alerts"]:
-            st.error(f"{alert['title']} - {alert['detail']}")
+    st.info("Drilldown is temporarily disabled while graph data is offline.")
 
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    if st.session_state.get("neo4j_ok") is False:
-        st.info(
-            f"Neo4j unavailable. Node manager actions are disabled until registration succeeds. "
-            f"{st.session_state.get('neo4j_last_error') or ''}"
-        )
-        return
-    search = st.text_input("Search Nodes", placeholder="Filter by node name")
-    with st.spinner("Syncing with SentriNode Network..."):
-        nodes = fetch_all_nodes()
-    if search:
-        nodes = [node for node in nodes if search.lower() in str(node["Node Name"]).lower()]
-    if nodes:
-        st.dataframe(pd.DataFrame(nodes), use_container_width=True, hide_index=True)
-        st.subheader("Actions")
-        for node in nodes:
-            cols = st.columns([3, 1])
-            cols[0].markdown(f"**{node['Node Name']}** · {node['Status']} · {node['IP Address']}")
-            if cols[1].button("Reboot Node", key=f"reboot-{node['Node Name']}"):
-                st.success(f"Reboot signal sent to {node['Node Name']}.")
-                st.toast(f"{node['Node Name']} reboot requested.", icon="♻️")
-    else:
-        st.info("No nodes to display. Check your connections or adjust the filter.")
+    st.info("Node manager is temporarily disabled while graph data is offline.")
 
 
 def show_dashboard():
@@ -1338,131 +916,15 @@ def show_dashboard():
 
 
 # --- SETTINGS LOGIC ---
-def _update_user_profile(username: str, full_name: str, email: str) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with _neo4j_session(driver) as session:
-            session.run(
-                """
-                MATCH (u:User {username:$username})
-                SET u.full_name = $full_name,
-                    u.notification_email = $email
-                """,
-                username=username,
-                full_name=full_name.strip(),
-                email=email.strip(),
-            )
-        return True
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
-
-
-def _update_user_preferences(username: str, theme: str, desktop_notifications: bool) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with _neo4j_session(driver) as session:
-            session.run(
-                """
-                MATCH (u:User {username:$username})
-                SET u.system_theme = $theme,
-                    u.desktop_notifications = $notify
-                """,
-                username=username,
-                theme=theme,
-                notify=desktop_notifications,
-            )
-        return True
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
-
-
-def _change_password(username: str, old_password: str, new_password: str) -> bool:
-    driver = _neo4j_driver()
-    if not driver:
-        return False
-    try:
-        with _neo4j_session(driver) as session:
-            record = session.run(
-                """
-                MATCH (u:User {username:$username})
-                WHERE coalesce(u.password, '') = $old
-                SET u.password = $new
-                RETURN u.username AS username
-                """,
-                username=username,
-                old=old_password,
-                new=new_password,
-            ).single()
-        return bool(record)
-    except (ServiceUnavailable, Neo4jError, ValueError):
-        return False
-    finally:
-        driver.close()
-
-
 def show_settings():
-    username = st.session_state.get("username") or ""
     st.header("Account Settings")
-    with st.form("profile_form"):
-        full_name = st.text_input("Full Name")
-        email = st.text_input("Notification Email")
-        submitted = st.form_submit_button("Save Profile")
-        if submitted:
-            with st.spinner("Syncing with SentriNode Network..."):
-                ok = _update_user_profile(username, full_name, email)
-            if ok:
-                st.success("Profile updated.")
-                st.toast("Profile saved.", icon="✅")
-            else:
-                st.error("Unable to update profile.")
-
-    st.divider()
-    st.subheader("Preferences")
-    themes = ["Auto", "Night Ops", "Day Ops"]
-    theme = st.selectbox("System Theme", themes)
-    desktop_notifications = st.checkbox("Enable Desktop Notifications")
-    if st.button("Save Preferences"):
-        with st.spinner("Syncing with SentriNode Network..."):
-            ok = _update_user_preferences(username, theme, desktop_notifications)
-        if ok:
-            st.success("Preferences saved.")
-            st.toast("Preferences updated.", icon="⚙️")
-        else:
-            st.error("Unable to save preferences.")
-
-    st.divider()
-    st.subheader("Security")
-    with st.form("password_form"):
-        old_password = st.text_input("Current Password", type="password")
-        new_password = st.text_input("New Password", type="password")
-        confirm_password = st.text_input("Confirm New Password", type="password")
-        change = st.form_submit_button("Change Password")
-        if change:
-            if not new_password or new_password != confirm_password:
-                st.error("Passwords do not match.")
-            else:
-                with st.spinner("Syncing with SentriNode Network..."):
-                    ok = _change_password(username, old_password, new_password)
-                if ok:
-                    st.success("Password updated.")
-                    st.toast("Credentials rotated.", icon="🔐")
-                else:
-                    st.error("Unable to update password. Check your current password.")
+    st.info("Account settings are temporarily disabled while graph features are offline.")
 
 
 # --- MAIN NAVIGATION ---
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
     render_auth_portal()
 else:
-    st.caption(f"NEO4J_URI: {os.getenv('NEO4J_URI') or 'unset'}")
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):
@@ -1472,13 +934,7 @@ else:
         st.session_state.user = None
         st.session_state.access_token = None
         st.session_state.show_signup = False
-        st.session_state.node_registered = False
-        st.session_state.registration_error = None
-        st.session_state.pending_registration = None
-        st.session_state.neo4j_ok = False
-        st.session_state.neo4j_last_error = None
         st.rerun()
-    _render_registration_status()
     if sidebar_option == "Dashboard":
         show_dashboard()
     elif sidebar_option == "Node Manager":
