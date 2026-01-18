@@ -91,6 +91,10 @@ if "registration_error" not in st.session_state:
     st.session_state.registration_error = None
 if "pending_registration" not in st.session_state:
     st.session_state.pending_registration = None
+if "neo4j_ok" not in st.session_state:
+    st.session_state.neo4j_ok = False
+if "neo4j_last_error" not in st.session_state:
+    st.session_state.neo4j_last_error = None
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -275,19 +279,29 @@ def _neo4j_driver():
     if not pwd:
         st.warning("NEO4J_PASSWORD is not set; unable to connect to Neo4j.")
         print("[neo4j] missing NEO4J_PASSWORD; cannot create driver")
+        st.session_state.neo4j_ok = False
+        st.session_state.neo4j_last_error = "NEO4J_PASSWORD not set"
         return None
-    try:
-        driver = GraphDatabase.driver(uri, auth=(user, pwd))
-        driver.verify_connectivity()
-        if NEO4J_DATABASE:
-            with driver.session(database=NEO4J_DATABASE) as session:
-                session.run("RETURN 1 AS ok").single()
-        return driver
-    except Exception as exc:
-        message = f"Neo4j connect failed ({uri}): {exc}"
-        st.warning(message)
-        print(message)
-        return None
+    last_error = None
+    for attempt in range(1, 11):
+        try:
+            driver = GraphDatabase.driver(uri, auth=(user, pwd))
+            driver.verify_connectivity()
+            if NEO4J_DATABASE:
+                with driver.session(database=NEO4J_DATABASE) as session:
+                    session.run("RETURN 1 AS ok").single()
+            st.session_state.neo4j_ok = True
+            st.session_state.neo4j_last_error = None
+            return driver
+        except Exception as exc:
+            last_error = str(exc)
+            st.session_state.neo4j_ok = False
+            st.session_state.neo4j_last_error = last_error
+            if attempt < 10:
+                time.sleep(1.0)
+    message = f"Neo4j connect failed ({uri}): {last_error}"
+    print(message)
+    return None
 
 
 def _neo4j_session(driver):
@@ -309,9 +323,13 @@ def _supabase_client() -> Client | None:
 
 
 def _neo4j_username_exists(user: str) -> tuple[bool, str | None]:
+    if st.session_state.get("neo4j_ok") is False and st.session_state.get("neo4j_last_error"):
+        return False, None
     driver = _neo4j_driver()
     if not driver:
-        return False, "Unable to connect to SentriNode network."
+        st.session_state.neo4j_ok = False
+        st.session_state.neo4j_last_error = st.session_state.get("neo4j_last_error") or "Unable to connect to Neo4j."
+        return False, None
     try:
         with _neo4j_session(driver) as session:
             record = session.run(
@@ -320,7 +338,9 @@ def _neo4j_username_exists(user: str) -> tuple[bool, str | None]:
             ).single()
         return bool(record), None
     except (ServiceUnavailable, Neo4jError, ValueError) as exc:
-        return False, str(exc)
+        st.session_state.neo4j_ok = False
+        st.session_state.neo4j_last_error = str(exc)
+        return False, None
     finally:
         driver.close()
 
@@ -340,7 +360,9 @@ def _run_registration(show_spinner: bool = True) -> None:
         if not driver:
             message = f"Unable to connect to Neo4j at {os.getenv('NEO4J_URI') or 'bolt://localhost:7687'}."
             print(f"Neo4j registration failed: {message}")
-            return False, message
+            st.session_state.neo4j_ok = False
+            st.session_state.neo4j_last_error = message
+            return False, None
         try:
             with _neo4j_session(driver) as session:
                 existing = session.run(
@@ -365,23 +387,26 @@ def _run_registration(show_spinner: bool = True) -> None:
                     email=payload.get("email") or username,
                     password=payload.get("password") or "",
                 )
+                st.session_state.neo4j_ok = True
+                st.session_state.neo4j_last_error = None
                 return True, None
         except (ServiceUnavailable, Neo4jError, ValueError) as exc:
             message = str(exc)
             print(f"Neo4j registration failed: {message}")
-            return False, message
+            st.session_state.neo4j_ok = False
+            st.session_state.neo4j_last_error = message
+            return False, None
         finally:
             driver.close()
 
     def _execute_with_retries() -> tuple[bool, str | None]:
-        attempts = 3 if show_spinner else 1
+        attempts = 10
         delay_seconds = 1.0
         for attempt in range(1, attempts + 1):
             success, error = _execute()
             if success or attempt == attempts:
                 return success, error
             time.sleep(delay_seconds)
-            delay_seconds = min(delay_seconds * 2, 4.0)
         return False, "Registration failed."
 
     if show_spinner:
@@ -394,12 +419,16 @@ def _run_registration(show_spinner: bool = True) -> None:
         st.session_state.node_registered = True
         st.session_state.registration_error = None
         st.session_state.pending_registration = None
+        st.session_state.neo4j_ok = True
+        st.session_state.neo4j_last_error = None
         st.toast("Node registration complete.", icon="🛰️")
         print(f"Neo4j registration completed for user '{username}'")
         st.rerun()
     else:
         st.session_state.node_registered = False
-        st.session_state.registration_error = error or "Registration failed."
+        st.session_state.registration_error = (
+            error or st.session_state.get("neo4j_last_error") or "Registration failed."
+        )
         print(f"Neo4j registration failed: {st.session_state.registration_error}")
 
 
@@ -412,6 +441,8 @@ def _start_registration_flow(username: str, email: str, password: str, mode: str
     }
     st.session_state.registration_error = None
     st.session_state.node_registered = False
+    st.session_state.neo4j_ok = False
+    st.session_state.neo4j_last_error = None
     _run_registration(show_spinner=True)
 
 
@@ -454,6 +485,8 @@ def is_strong_password(pw: str) -> tuple[bool, str]:
 
 def _resolve_user_role(username: str) -> str:
     role = st.session_state.get("user_role", "user")
+    if st.session_state.get("neo4j_ok") is False:
+        return role
     driver = _neo4j_driver()
     if not driver:
         return role
@@ -485,6 +518,8 @@ class FilterContext:
 
 @st.cache_data(ttl=60)
 def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
+    if st.session_state.get("neo4j_ok") is False and st.session_state.get("neo4j_last_error"):
+        return []
     driver = _neo4j_driver()
     if not driver:
         return []
@@ -494,6 +529,8 @@ def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
             result = session.run(query, **params)
             return [dict(record) for record in result]
     except (ServiceUnavailable, Neo4jError, ValueError) as exc:
+        st.session_state.neo4j_ok = False
+        st.session_state.neo4j_last_error = str(exc)
         st.warning(f"Neo4j query failed: {exc}")
         return []
     finally:
@@ -636,11 +673,12 @@ def show_signup(client: Client | None = None) -> None:
 def _render_registration_status() -> None:
     if not st.session_state.get("user"):
         return
-    if st.session_state.get("registration_error"):
-        st.error(f"Neo4j registration failed: {st.session_state['registration_error']}")
-        if st.session_state.get("pending_registration") and st.button(
-            "Retry registration", key="retry_registration_btn"
-        ):
+    error_msg = st.session_state.get("registration_error") or st.session_state.get("neo4j_last_error")
+    if not error_msg and st.session_state.get("neo4j_ok") is False:
+        error_msg = "Neo4j is unavailable."
+    if error_msg:
+        st.warning(f"Neo4j registration failed: {error_msg}")
+        if st.button("Retry Neo4j registration", key="retry_registration_btn"):
             _run_registration(show_spinner=True)
     elif not st.session_state.get("node_registered"):
         st.info("Authenticated. Completing Neo4j registration...")
@@ -837,6 +875,12 @@ def render_schema_inventory() -> None:
 
 
 def render_admin_dashboard() -> None:
+    if st.session_state.get("neo4j_ok") is False:
+        st.info(
+            f"Neo4j unavailable. Dashboard data is disabled until registration succeeds. "
+            f"{st.session_state.get('neo4j_last_error') or ''}"
+        )
+        return
     filters = _sidebar_filters()
     st.caption(
         f"Window: {filters.since.isoformat()} ➝ {filters.until.isoformat()} | Search: {filters.search or '—'}"
@@ -863,6 +907,12 @@ def render_admin_dashboard() -> None:
 
 def render_user_dashboard(username: str) -> None:
     st.caption("Personal Node Status")
+    if st.session_state.get("neo4j_ok") is False:
+        st.info(
+            f"Neo4j unavailable. Node status is paused until registration succeeds. "
+            f"{st.session_state.get('neo4j_last_error') or ''}"
+        )
+        return
     with st.spinner("Syncing with SentriNode Network..."):
         nodes = fetch_user_nodes(username)
     summary_cols = st.columns(2)
@@ -1201,6 +1251,12 @@ def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, A
 
 def _render_node_drilldown(filters: FilterContext) -> None:
     st.subheader("Node Drilldown")
+    if st.session_state.get("neo4j_ok") is False:
+        st.info(
+            f"Neo4j unavailable. Drilldown is disabled until registration succeeds. "
+            f"{st.session_state.get('neo4j_last_error') or ''}"
+        )
+        return
     node_name = st.session_state.get("selected_node")
     if not node_name:
         st.info("Select a node from any table to drill down.")
@@ -1232,6 +1288,12 @@ def _render_node_drilldown(filters: FilterContext) -> None:
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
+    if st.session_state.get("neo4j_ok") is False:
+        st.info(
+            f"Neo4j unavailable. Node manager actions are disabled until registration succeeds. "
+            f"{st.session_state.get('neo4j_last_error') or ''}"
+        )
+        return
     search = st.text_input("Search Nodes", placeholder="Filter by node name")
     with st.spinner("Syncing with SentriNode Network..."):
         nodes = fetch_all_nodes()
@@ -1384,11 +1446,7 @@ def show_settings():
 
 
 # --- MAIN NAVIGATION ---
-if (
-    not st.session_state.get("user")
-    or not st.session_state.get("access_token")
-    or not st.session_state.get("node_registered")
-):
+if not st.session_state.get("user") or not st.session_state.get("access_token"):
     render_auth_portal()
 else:
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
@@ -1403,7 +1461,10 @@ else:
         st.session_state.node_registered = False
         st.session_state.registration_error = None
         st.session_state.pending_registration = None
+        st.session_state.neo4j_ok = False
+        st.session_state.neo4j_last_error = None
         st.rerun()
+    _render_registration_status()
     if sidebar_option == "Dashboard":
         show_dashboard()
     elif sidebar_option == "Node Manager":
