@@ -554,19 +554,19 @@ def render_hero(text: str) -> None:
 
 # --- SCHEMA INVENTORY PANEL ---
 def render_schema_inventory() -> None:
-    st.info("Graph inventory is temporarily disabled.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 # --- UI LOGIC ---
 
 
 def render_admin_dashboard() -> None:
-    st.info("Admin dashboards are temporarily disabled while graph data is offline.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def render_user_dashboard(username: str) -> None:
     st.caption("Personal Node Status")
-    st.info("Node status is temporarily disabled while graph data is offline.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
@@ -895,12 +895,12 @@ def _fetch_node_drilldown(node_name: str, filters: FilterContext) -> dict[str, A
 
 def _render_node_drilldown(filters: FilterContext) -> None:
     st.subheader("Node Drilldown")
-    st.info("Drilldown is temporarily disabled while graph data is offline.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    st.info("Node manager is temporarily disabled while graph data is offline.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 def show_dashboard():
@@ -918,7 +918,7 @@ def show_dashboard():
 # --- SETTINGS LOGIC ---
 def show_settings():
     st.header("Account Settings")
-    st.info("Account settings are temporarily disabled while graph features are offline.")
+    st.info("Temporarily disabled while storage is being migrated.")
 
 
 # --- MAIN NAVIGATION ---
