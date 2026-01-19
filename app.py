@@ -1,6 +1,9 @@
+import hashlib
 import json
 import os
 import re
+import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -9,6 +12,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 from supabase import Client, create_client
 
 try:
@@ -106,6 +110,12 @@ if "pref_email_notifications" not in st.session_state:
     st.session_state.pref_email_notifications = True
 if "support_tickets" not in st.session_state:
     st.session_state.support_tickets = []
+if "nodes" not in st.session_state:
+    st.session_state.nodes = []
+if "live_update_enabled" not in st.session_state:
+    st.session_state.live_update_enabled = True
+if "live_update_interval" not in st.session_state:
+    st.session_state.live_update_interval = 2
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -350,6 +360,7 @@ def _handle_auth_success(
     message = toast_message or ("Console unlocked. Welcome back." if mode == "login" else "Account created and signed in.")
     st.toast(message, icon=toast_icon)
     _start_registration_flow(username, resolved_email, password, mode)
+    st.rerun()
 
 
 def is_strong_password(pw: str) -> tuple[bool, str]:
@@ -381,7 +392,7 @@ class FilterContext:
     tags: list[str]
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
     return []
 
@@ -705,6 +716,32 @@ def _render_dashboard_tables(top_services: pd.DataFrame, events: pd.DataFrame) -
             st.dataframe(events, use_container_width=True, hide_index=True)
 
 
+def _live_update_controls() -> None:
+    interval_options = [1, 2, 5, 10]
+    current_interval = (
+        st.session_state.live_update_interval
+        if st.session_state.live_update_interval in interval_options
+        else 2
+    )
+    col1, col2, col3 = st.columns(3)
+    col1.checkbox("Live Update", value=st.session_state.live_update_enabled, key="live_update_enabled")
+    col2.selectbox(
+        "Interval (seconds)",
+        interval_options,
+        index=interval_options.index(current_interval),
+        key="live_update_interval",
+    )
+    if col3.button("Refresh now"):
+        st.cache_data.clear()
+        st.rerun()
+
+    if st.session_state.get("live_update_enabled", True):
+        st_autorefresh(
+            interval=int(st.session_state.get("live_update_interval", 2) * 1000),
+            key="dashboard_autorefresh",
+        )
+
+
 HERO_STYLE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&display=swap');
@@ -960,9 +997,245 @@ def _render_node_drilldown(filters: FilterContext) -> None:
     st.info("Temporarily disabled while storage is being migrated.")
 
 
+def _ensure_nodes_state() -> None:
+    if "nodes" not in st.session_state:
+        st.session_state.nodes = []
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _persist_node_to_supabase(node: dict[str, Any]) -> None:
+    client = _supabase_client()
+    user = st.session_state.get("user")
+    user_id = getattr(user, "id", None) if user else None
+    if not client or not user_id:
+        return
+    record = {
+        "user_id": user_id,
+        "node_id": node.get("node_id"),
+        "name": node.get("name"),
+        "environment": node.get("environment"),
+        "region": node.get("region"),
+        "tags": node.get("tags", []),
+        "status": node.get("status"),
+        "agent_version": node.get("agent_version"),
+        "last_heartbeat": node.get("last_heartbeat").isoformat() if node.get("last_heartbeat") else None,
+        "token_hash": node.get("token_hash"),
+        "token_last4": node.get("token_last4"),
+        "created_at": node.get("created_at").isoformat() if node.get("created_at") else None,
+        "updated_at": node.get("updated_at").isoformat() if node.get("updated_at") else None,
+    }
+    try:
+        client.table("nodes").upsert(record).execute()
+    except Exception:
+        pass
+
+
+def _add_node_entry(
+    name: str, environment: str, region: str, tags: list[str], agent_version: str = "unknown"
+) -> tuple[dict[str, Any], str]:
+    _ensure_nodes_state()
+    token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
+    last4 = token[-4:]
+    now = datetime.utcnow()
+    node = {
+        "node_id": str(uuid.uuid4()),
+        "name": name.strip(),
+        "environment": environment or "",
+        "region": region or "",
+        "status": "Pending",
+        "last_heartbeat": None,
+        "agent_version": agent_version or "unknown",
+        "tags": [t for t in tags if t],
+        "token_hash": token_hash,
+        "token_last4": last4,
+        "created_at": now,
+        "updated_at": now,
+    }
+    st.session_state.nodes.append(node)
+    _persist_node_to_supabase(node)
+    return node, token
+
+
+def _find_node(node_id: str) -> tuple[dict[str, Any] | None, int | None]:
+    _ensure_nodes_state()
+    for idx, node in enumerate(st.session_state.nodes):
+        if node.get("node_id") == node_id:
+            return node, idx
+    return None, None
+
+
+def _update_node_status(node_id: str, status: str, last_heartbeat: datetime | None = None) -> None:
+    node, idx = _find_node(node_id)
+    if node is None or idx is None:
+        return
+    updated = dict(node)
+    updated["status"] = status
+    if last_heartbeat is not None:
+        updated["last_heartbeat"] = last_heartbeat
+    updated["updated_at"] = datetime.utcnow()
+    st.session_state.nodes[idx] = updated
+    _persist_node_to_supabase(updated)
+
+
+def _rotate_node_token(node_id: str) -> str | None:
+    node, idx = _find_node(node_id)
+    if node is None or idx is None:
+        return None
+    token = secrets.token_urlsafe(32)
+    updated = dict(node)
+    updated["token_hash"] = _hash_token(token)
+    updated["token_last4"] = token[-4:]
+    updated["updated_at"] = datetime.utcnow()
+    st.session_state.nodes[idx] = updated
+    _persist_node_to_supabase(updated)
+    return token
+
+
+def _delete_node_entry(node_id: str) -> None:
+    _ensure_nodes_state()
+    st.session_state.nodes = [n for n in st.session_state.nodes if n.get("node_id") != node_id]
+    client = _supabase_client()
+    user = st.session_state.get("user")
+    user_id = getattr(user, "id", None) if user else None
+    if client and user_id:
+        try:
+            client.table("nodes").delete().match({"user_id": user_id, "node_id": node_id}).execute()
+        except Exception:
+            pass
+
+
+def _render_install_instructions(token_placeholder: str, api_url: str) -> None:
+    docker_tab, systemd_tab, k8s_tab = st.tabs(["Docker", "Linux systemd", "Kubernetes"])
+    with docker_tab:
+        st.code(
+            f"""export NODE_TOKEN="{token_placeholder}"
+export SENTRINODE_API_URL="{api_url}"
+docker run -d --name sentrinode-agent \\
+  -e NODE_TOKEN="$NODE_TOKEN" \\
+  -e SENTRINODE_API_URL="$SENTRINODE_API_URL" \\
+  ghcr.io/sentrinode/agent:latest
+""",
+            language="bash",
+        )
+        st.caption("Telemetry stays on your side; the agent only sends lightweight heartbeats.")
+    with systemd_tab:
+        st.info("Placeholder: create a systemd service that exports NODE_TOKEN and SENTRINODE_API_URL.")
+    with k8s_tab:
+        st.info("Placeholder: use a Kubernetes secret for NODE_TOKEN and set SENTRINODE_API_URL in your Deployment.")
+
+
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    st.info("Temporarily disabled while storage is being migrated.")
+    _ensure_nodes_state()
+    nodes = st.session_state.nodes
+    api_url = os.getenv("SENTRINODE_API_URL", "https://api.sentrinode.io")
+
+    total_nodes = len(nodes)
+    connected = sum(1 for n in nodes if n.get("status") == "Connected")
+    pending = sum(1 for n in nodes if n.get("status") == "Pending")
+    disconnected = sum(
+        1 for n in nodes if n.get("status") in ("Disconnected", "Disabled", "Unknown")
+    )
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Total nodes", total_nodes)
+    metric_cols[1].metric("Connected", connected)
+    metric_cols[2].metric("Disconnected", disconnected)
+    metric_cols[3].metric("Pending setup", pending)
+
+    st.subheader("Add Node")
+    with st.expander("Add a new node", expanded=(total_nodes == 0)):
+        with st.form("add_node_form"):
+            name = st.text_input("Name", key="add_node_name")
+            environment = st.selectbox("Environment", ["prod", "staging", "dev"], key="add_node_env")
+            region = st.text_input("Region", key="add_node_region")
+            tags_raw = st.text_input("Tags (comma separated)", key="add_node_tags")
+            submitted = st.form_submit_button("Create node")
+        if submitted:
+            if not name.strip():
+                st.error("Name is required.")
+            else:
+                tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+                new_node, token = _add_node_entry(name, environment, region, tags)
+                st.success(
+                    f"Node '{new_node['name']}' created. Save this token now; it will not be shown again."
+                )
+                st.code(token, language=None)
+                st.caption(
+                    f"Token last 4: {new_node['token_last4']} • Store this securely. Telemetry stays on your side."
+                )
+                st.markdown("#### Install instructions")
+                _render_install_instructions(token, api_url)
+
+    st.subheader("Nodes")
+    if not nodes:
+        st.info("No nodes yet. Add your first node to start managing agents.")
+    else:
+        table_rows = []
+        for node in nodes:
+            last_hb = node.get("last_heartbeat")
+            last_hb_str = (
+                last_hb.strftime("%Y-%m-%d %H:%M:%S UTC") if isinstance(last_hb, datetime) else "—"
+            )
+            table_rows.append(
+                {
+                    "name": node.get("name", ""),
+                    "environment": node.get("environment", ""),
+                    "region": node.get("region", ""),
+                    "status": node.get("status", "Unknown"),
+                    "last_heartbeat": last_hb_str,
+                    "agent_version": node.get("agent_version", "unknown"),
+                    "tags": ", ".join(node.get("tags", [])),
+                }
+            )
+        st.dataframe(pd.DataFrame(table_rows), hide_index=True, use_container_width=True)
+
+    for node in nodes:
+        node_id = node.get("node_id", "")
+        last_hb = node.get("last_heartbeat")
+        with st.expander(f"{node.get('name', 'Unnamed')} • {node.get('status', 'Unknown')}"):
+            st.caption(f"Token last 4: {node.get('token_last4', '----')}")
+            st.write(f"Environment: {node.get('environment', '')}")
+            st.write(f"Region: {node.get('region', '')}")
+            st.write(f"Agent version: {node.get('agent_version', 'unknown')}")
+            st.write(
+                f"Last heartbeat: {last_hb.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(last_hb, datetime) else 'Not reported'}"
+            )
+            st.write(f"Tags: {', '.join(node.get('tags', [])) or 'None'}")
+
+            action_cols = st.columns(4)
+            if action_cols[0].button("View setup", key=f"view_setup_{node_id}"):
+                st.markdown("###### Install instructions")
+                _render_install_instructions("<YOUR_NODE_TOKEN>", api_url)
+            if action_cols[1].button("Rotate token", key=f"rotate_token_{node_id}"):
+                new_token = _rotate_node_token(node_id)
+                if new_token:
+                    st.success("New token generated. Save it now; it will not be shown again.")
+                    st.code(new_token, language=None)
+            toggle_label = "Enable node" if node.get("status") == "Disabled" else "Disable node"
+            if action_cols[2].button(toggle_label, key=f"toggle_node_{node_id}"):
+                new_status = "Connected" if node.get("status") == "Disabled" else "Disabled"
+                _update_node_status(node_id, new_status)
+            if action_cols[3].button("Test connection", key=f"test_node_{node_id}"):
+                if st.session_state.get("dashboard_demo"):
+                    _update_node_status(node_id, "Connected", last_heartbeat=datetime.utcnow())
+                    st.success("Demo heartbeat recorded.")
+                else:
+                    _update_node_status(node_id, "Unknown")
+                    st.info("Agent will report heartbeats once installed.")
+
+            delete_confirm = st.text_input("Type DELETE to confirm removal", key=f"delete_confirm_{node_id}")
+            if st.button("Delete node", key=f"delete_node_{node_id}"):
+                if delete_confirm == "DELETE":
+                    _delete_node_entry(node_id)
+                    st.success("Node deleted.")
+                    st.rerun()
+                else:
+                    st.error("Please type DELETE to confirm.")
 
 
 def show_dashboard():
@@ -970,9 +1243,11 @@ def show_dashboard():
     username = st.session_state.get("username", "operator")
     if role == "admin":
         render_hero("SentriNode Operational Command")
+        _live_update_controls()
         render_admin_dashboard()
     else:
         render_hero("Dashboard")
+        _live_update_controls()
         render_user_dashboard(username)
     st.caption(f"Last synced: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
