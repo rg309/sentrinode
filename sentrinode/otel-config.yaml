@@ -16,22 +16,32 @@ processors:
   batch:
 
 exporters:
+  logging:
+    loglevel: debug
   otlp:
-    endpoint: "sentrinode-production.up.railway.app:4317"
+    endpoint: "${SENTRINODE_OTLP_ENDPOINT}"
     headers:
       "x-sentrinode-key": "${API_KEY}"
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 5120
+    retry_on_failure:
+      enabled: true
 
 service:
   pipelines:
     traces:
       receivers: [otlp, jaeger, zipkin]
       processors: [batch]
-      exporters: [otlp]
+      exporters: [logging, otlp]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp]
+      exporters: [logging, otlp]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp]
+      exporters: [logging, otlp]

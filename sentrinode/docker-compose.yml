@@ -20,6 +20,11 @@ services:
     image: otel/opentelemetry-collector-contrib:0.94.0
     container_name: sentrinode-agent
     command: ["--config=/etc/otel/config.yaml"]
+    env_file:
+      - .env
+    environment:
+      API_KEY: ${API_KEY:-}
+      SENTRINODE_OTLP_ENDPOINT: ${SENTRINODE_OTLP_ENDPOINT:-host.docker.internal:4317}
     volumes:
       - ./otel-config.yaml:/etc/otel/config.yaml:ro
     ports:
