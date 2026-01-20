@@ -11,8 +11,6 @@ processors:
 exporters:
   logging:
     verbosity: detailed
-    sampling_initial: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:0}
-    sampling_thereafter: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:0}
   otlphttp/ingest:
     endpoint: "${INGEST_ENDPOINT:http://sentrinode-ingest:8000}"
     traces_endpoint: "${INGEST_TRACES_ENDPOINT:http://sentrinode-ingest:8000/v1/otlp/traces}"
