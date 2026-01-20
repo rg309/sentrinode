@@ -4,37 +4,44 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
         include_metadata: true
+  jaeger:
+    protocols:
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+  zipkin:
+    endpoint: 0.0.0.0:9411
 
 processors:
   batch: {}
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100
+    policies:
+      - name: high-latency-anomaly
+        type: latency
+        latency:
+          threshold_ms: 2000
 
 exporters:
   logging:
     verbosity: detailed
-  otlphttp/ingest:
-    endpoint: "${INGEST_ENDPOINT:http://sentrinode-ingest:8000}"
-    traces_endpoint: "${INGEST_TRACES_ENDPOINT:http://sentrinode-ingest:8000/v1/otlp/traces}"
-    metrics_endpoint: "${INGEST_METRICS_ENDPOINT:http://sentrinode-ingest:8000/v1/otlp/metrics}"
-    headers:
-      X-Tenant-Id: "${X_TENANT_ID:}"
-      X-SentriNode-Key: "${X_SENTRINODE_KEY:}"
-    sending_queue:
-      enabled: true
-      num_consumers: 4
-      queue_size: 2048
-    retry_on_failure:
-      enabled: true
+
+connectors:
+  spanmetrics:
+    histogram:
+      explicit:
+        buckets: [100ms, 500ms, 1s, 2s, 5s]
 
 service:
   pipelines:
     traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/ingest, logging]
+      receivers: [otlp, jaeger, zipkin]
+      processors: [tail_sampling, batch]
+      exporters: [logging, spanmetrics]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, spanmetrics]
       processors: [batch]
-      exporters: [otlphttp/ingest, logging]
+      exporters: [logging]
     logs:
       receivers: [otlp]
       processors: [batch]
