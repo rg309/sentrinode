@@ -5,12 +5,6 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-  jaeger:
-    protocols:
-      thrift_http:
-        endpoint: 0.0.0.0:14268
-  zipkin:
-    endpoint: 0.0.0.0:9411
 
 processors:
   batch:
@@ -21,18 +15,6 @@ processors:
         action: insert
 
 exporters:
-  logging:
-    loglevel: debug
-  otlp:
-    endpoint: "accomplished-creativity-production-653b.up.railway.app:4318"
-    tls:
-      insecure: true
-    sending_queue:
-      enabled: true
-      num_consumers: 4
-      queue_size: 5120
-    retry_on_failure:
-      enabled: true
   prometheus:
     endpoint: "0.0.0.0:9464"
     resource_to_telemetry_conversion:
@@ -47,14 +29,10 @@ connectors:
 service:
   pipelines:
     traces:
-      receivers: [otlp, jaeger, zipkin]
+      receivers: [otlp]
       processors: [resource, batch]
-      exporters: [otlp, spanmetrics]
+      exporters: [spanmetrics]
     metrics:
-      receivers: [otlp, spanmetrics]
+      receivers: [spanmetrics]
       processors: [batch]
       exporters: [prometheus]
-    logs:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [logging, otlp]

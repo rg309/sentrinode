@@ -1,62 +1,17 @@
 version: "3.9"
 
 services:
-  neo4j:
-    image: neo4j:5.17
-    container_name: sentrinode-neo4j
-    restart: unless-stopped
-    environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
-      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-    volumes:
-      - ./neo4j_data:/data
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    networks:
-      - sentrinode-network
-
   sentrinode-agent:
     image: otel/opentelemetry-collector-contrib:0.94.0
     container_name: sentrinode-agent
     command: ["--config=/etc/otel/config.yaml"]
-    depends_on:
-      - sentrinode-ingest
-    env_file:
-      - .env
-    environment:
-      API_KEY: ${API_KEY:-}
-      INGEST_ENDPOINT: ${INGEST_ENDPOINT:-http://sentrinode-ingest:8000}
-      INGEST_TRACES_ENDPOINT: ${INGEST_TRACES_ENDPOINT:-http://sentrinode-ingest:8000/v1/otlp/traces}
-      INGEST_METRICS_ENDPOINT: ${INGEST_METRICS_ENDPOINT:-http://sentrinode-ingest:8000/v1/otlp/metrics}
-      X_TENANT_ID: ${X_TENANT_ID:-local-tenant}
-      X_SENTRINODE_KEY: ${X_SENTRINODE_KEY:-local-dev-key}
-      SENTRINODE_DEBUG_LOGGING_SAMPLES: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:-0}
     volumes:
-      - ./collector/otel-railway.yaml:/etc/otel/config.yaml:ro
+      - ./otel-config.yaml:/etc/otel/config.yaml:ro
     ports:
       - "4317:4317"
       - "4318:4318"
       - "14268:14268"
-    restart: unless-stopped
-    networks:
-      - sentrinode-network
-
-  sentrinode-ingest:
-    build:
-      context: .
-      dockerfile: ingest/Dockerfile
-    container_name: sentrinode-ingest
-    env_file:
-      - .env
-    environment:
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      MAX_BODY_BYTES: ${INGEST_MAX_BODY_BYTES:-5242880}
-      NODE_TTL_SECONDS: ${INGEST_NODE_TTL_SECONDS:-900}
-      MAX_NODES_PER_TENANT: ${INGEST_MAX_NODES_PER_TENANT:-500}
-    ports:
-      - "8000:8000"
+      - "9464:9464"
     restart: unless-stopped
     networks:
       - sentrinode-network
@@ -68,16 +23,13 @@ services:
     container_name: sentrinode-ui
     depends_on:
       - sentrinode-agent
-      - neo4j
     env_file:
       - .env
     environment:
-      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
-      NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       LICENSE_SERIAL: ${LICENSE_SERIAL}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      PIPELINE_METRICS_URL: ${PIPELINE_METRICS_URL:-http://sentrinode-agent:9464/metrics}
     ports:
       - "8501:8501"
     restart: unless-stopped

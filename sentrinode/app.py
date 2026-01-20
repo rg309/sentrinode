@@ -651,6 +651,8 @@ class FilterContext:
 
 @st.cache_data(ttl=60)
 def _run_cypher(query: str, params: dict | None = None) -> list[dict[str, Any]]:
+    """Legacy shim: scrape live pipeline metrics instead of querying a database."""
+    fetch_live_pipeline_raw()
     return []
 
 
