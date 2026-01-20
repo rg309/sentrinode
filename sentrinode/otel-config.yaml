@@ -33,17 +33,27 @@ exporters:
       queue_size: 5120
     retry_on_failure:
       enabled: true
+  prometheus:
+    endpoint: "0.0.0.0:9464"
+    resource_to_telemetry_conversion:
+      enabled: true
+
+connectors:
+  spanmetrics:
+    histogram:
+      explicit:
+        buckets: [100ms, 500ms, 1s, 2s, 5s]
 
 service:
   pipelines:
     traces:
       receivers: [otlp, jaeger, zipkin]
       processors: [resource, batch]
-      exporters: [logging, otlp]
+      exporters: [logging, otlp, spanmetrics]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, spanmetrics]
       processors: [batch]
-      exporters: [logging, otlp]
+      exporters: [prometheus]
     logs:
       receivers: [otlp]
       processors: [batch]

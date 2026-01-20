@@ -109,6 +109,7 @@ if "tenant_memberships" not in st.session_state:
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
+LIVE_PIPELINE_METRICS_URL = os.getenv("PIPELINE_METRICS_URL") or "http://localhost:9464/metrics"
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
@@ -447,6 +448,18 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
     if err:
         return None, err
     return data or {}, None
+
+
+def fetch_live_pipeline_data(url: str | None = None) -> str:
+    target = (url or LIVE_PIPELINE_METRICS_URL or "").strip()
+    if not target:
+        return "Metrics endpoint not configured."
+    try:
+        res = requests.get(target, timeout=5)
+        res.raise_for_status()
+        return res.text
+    except Exception as exc:  # pragma: no cover - network
+        return f"Error connecting to pipeline: {exc}"
 
 
 def _generate_raw_api_key() -> str:
@@ -1251,6 +1264,10 @@ def show_node_manager():
         if attrs:
             st.markdown("##### Attributes")
             st.json(attrs)
+
+    st.markdown("#### Live Pipeline Data (Direct)")
+    metrics_text = fetch_live_pipeline_data()
+    st.text_area("Current Metrics Stream", metrics_text or "No metrics available yet.", height=240)
 
 
 def show_api_keys() -> None:
