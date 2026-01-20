@@ -450,7 +450,7 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
     return data or {}, None
 
 
-def fetch_live_pipeline_data(url: str | None = None) -> str:
+def fetch_live_pipeline_raw(url: str | None = None) -> str:
     target = (url or LIVE_PIPELINE_METRICS_URL or "").strip()
     if not target:
         return "Metrics endpoint not configured."
@@ -460,6 +460,64 @@ def fetch_live_pipeline_data(url: str | None = None) -> str:
         return res.text
     except Exception as exc:  # pragma: no cover - network
         return f"Error connecting to pipeline: {exc}"
+
+
+def _parse_prometheus_metrics(text: str) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name = parts[0].split("{")[0]
+        try:
+            value = float(parts[1])
+        except ValueError:
+            continue
+        metrics[name] = value
+    return metrics
+
+
+def _fetch_live_pipeline_data(url: str | None = None) -> dict[str, Any]:
+    target = (url or LIVE_PIPELINE_METRICS_URL or "").strip() or "http://localhost:9464/metrics"
+    raw_text = ""
+    try:
+        res = requests.get(target, timeout=5)
+        res.raise_for_status()
+        raw_text = res.text
+    except Exception:
+        raw_text = ""
+
+    metrics_map = _parse_prometheus_metrics(raw_text) if raw_text else {}
+    latency_p50 = metrics_map.get("latency_p50_ms", 0.0)
+    latency_p95 = metrics_map.get("latency_p95_ms", metrics_map.get("rpc_server_duration_seconds_sum", 0.0))
+    rpm = metrics_map.get("calls_total", metrics_map.get("requests_total", 0.0))
+    error_rate = metrics_map.get("error_rate", 0.0)
+
+    kpis = {"p50": latency_p50, "p95": latency_p95, "error_rate": error_rate, "rpm": rpm}
+    now = datetime.utcnow()
+    latency_df = pd.DataFrame(
+        {
+            "timestamp": [now],
+            "latency_p50": [latency_p50],
+            "latency_p95": [latency_p95],
+        }
+    )
+    top_services = pd.DataFrame(
+        {
+            "Service": list(metrics_map.keys())[:5] if metrics_map else [],
+            "p95_latency_ms": list(metrics_map.values())[:5] if metrics_map else [],
+        }
+    )
+    events = pd.DataFrame(
+        {
+            "timestamp": [now],
+            "event": ["Pipeline scrape"],
+            "status": ["ok" if raw_text else "offline"],
+        }
+    )
+    return {"kpis": kpis, "latency": latency_df, "top_services": top_services, "events": events}
 
 
 def get_live_pipeline_metrics(url: str | None = None) -> str:
@@ -940,7 +998,7 @@ def render_user_dashboard(username: str) -> None:
     if demo_enabled:
         data = _generate_demo_dashboard_data(start, end)
     else:
-        data = {"kpis": {"p50": 0, "p95": 0, "error_rate": 0, "rpm": 0}, "latency": pd.DataFrame(), "top_services": pd.DataFrame(), "events": pd.DataFrame()}
+        data = _fetch_live_pipeline_data()
     _render_kpi_cards(data["kpis"])
     _render_latency_chart(data.get("latency"), demo_enabled)
     _render_dashboard_tables(data.get("top_services"), data.get("events"), demo_enabled)
@@ -1280,7 +1338,7 @@ def show_node_manager():
             st.json(attrs)
 
     st.markdown("#### Live Pipeline Data (Direct)")
-    metrics_text = fetch_live_pipeline_data()
+    metrics_text = fetch_live_pipeline_raw()
     st.text_area("Current Metrics Stream", metrics_text or "No metrics available yet.", height=240)
 
 

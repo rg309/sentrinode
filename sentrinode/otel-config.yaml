@@ -17,7 +17,7 @@ processors:
   resource:
     attributes:
       - key: "sentrinode.node_id"
-        value: "my-custom-node-001"
+        value: "local-node-001"
         action: insert
 
 exporters:
@@ -49,7 +49,7 @@ service:
     traces:
       receivers: [otlp, jaeger, zipkin]
       processors: [resource, batch]
-      exporters: [logging, otlp, spanmetrics]
+      exporters: [otlp, spanmetrics]
     metrics:
       receivers: [otlp, spanmetrics]
       processors: [batch]
