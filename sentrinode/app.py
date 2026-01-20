@@ -450,6 +450,15 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
     return data or {}, None
 
 
+def fetch_live_pipeline() -> str:
+    url = "http://localhost:9464/metrics"
+    try:
+        response = requests.get(url, timeout=1)
+        return response.text
+    except Exception:
+        return "Collector Offline"
+
+
 def fetch_live_pipeline_raw(url: str | None = None) -> str:
     target = (url or LIVE_PIPELINE_METRICS_URL or "").strip()
     if not target:
