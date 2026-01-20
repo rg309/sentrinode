@@ -25,6 +25,12 @@ processors:
 exporters:
   logging:
     verbosity: detailed
+  otlp/remote:
+    endpoint: "sentrinode-production.up.railway.app:443"
+    tls:
+      insecure: false
+    headers:
+      "x-sentrinode-key": "${API_KEY}"
 
 connectors:
   spanmetrics:
@@ -37,12 +43,12 @@ service:
     traces:
       receivers: [otlp, jaeger, zipkin]
       processors: [tail_sampling, batch]
-      exporters: [logging, spanmetrics]
+      exporters: [logging, spanmetrics, otlp/remote]
     metrics:
       receivers: [otlp, spanmetrics]
       processors: [batch]
-      exporters: [logging]
+      exporters: [logging, otlp/remote]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [logging, otlp/remote]
