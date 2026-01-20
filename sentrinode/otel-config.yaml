@@ -24,7 +24,7 @@ exporters:
   logging:
     loglevel: debug
   otlp:
-    endpoint: "sentrinode-production.up.railway.app:4317"
+    endpoint: "accomplished-creativity-production-653b.up.railway.app:4318"
     tls:
       insecure: true
     sending_queue:
