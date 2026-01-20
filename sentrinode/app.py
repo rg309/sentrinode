@@ -462,6 +462,17 @@ def fetch_live_pipeline_data(url: str | None = None) -> str:
         return f"Error connecting to pipeline: {exc}"
 
 
+def get_live_pipeline_metrics(url: str | None = None) -> str:
+    """Expose a simple accessor for the live pipeline metrics endpoint."""
+    target = url or LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics"
+    try:
+        res = requests.get(target, timeout=2)
+        res.raise_for_status()
+        return res.text
+    except Exception as exc:  # pragma: no cover - network
+        return f"Pipeline Offline: {exc}"
+
+
 def _generate_raw_api_key() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
 
@@ -933,6 +944,9 @@ def render_user_dashboard(username: str) -> None:
     _render_kpi_cards(data["kpis"])
     _render_latency_chart(data.get("latency"), demo_enabled)
     _render_dashboard_tables(data.get("top_services"), data.get("events"), demo_enabled)
+    st.subheader("Direct Pipeline Stream")
+    metrics_raw = get_live_pipeline_metrics()
+    st.code(metrics_raw, language="text")
 
 
 def _fetch_time_series(filters: FilterContext) -> pd.DataFrame:
