@@ -549,6 +549,15 @@ def fetch_pipeline_data() -> str:
         return "Waiting for Data..."
 
 
+def fetch_from_pipeline() -> str:
+    """Fetch live metrics directly from the collector in the same network."""
+    try:
+        r = requests.get("http://sentrinode-agent:9464/metrics", timeout=1)
+        return r.text
+    except Exception:
+        return "No data in pipeline yet..."
+
+
 def _generate_raw_api_key() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
 
