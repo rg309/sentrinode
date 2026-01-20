@@ -14,14 +14,17 @@ receivers:
 
 processors:
   batch:
+  resource:
+    attributes:
+      - key: "sentrinode.node_id"
+        value: "my-custom-node-001"
+        action: insert
 
 exporters:
   logging:
     loglevel: debug
   otlp:
-    endpoint: "${SENTRINODE_OTLP_ENDPOINT}"
-    headers:
-      "x-sentrinode-key": "${API_KEY}"
+    endpoint: "sentrinode-production.up.railway.app:4317"
     tls:
       insecure: true
     sending_queue:
@@ -35,7 +38,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp, jaeger, zipkin]
-      processors: [batch]
+      processors: [resource, batch]
       exporters: [logging, otlp]
     metrics:
       receivers: [otlp]
