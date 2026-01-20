@@ -541,14 +541,6 @@ def get_live_pipeline_metrics(url: str | None = None) -> str:
 
 
 def fetch_pipeline_data() -> str:
-    url = "http://localhost:9464/metrics"
-    try:
-        response = requests.get(url, timeout=1)
-        return response.text
-    except Exception:
-        return "Waiting for Data..."
-
-
 def fetch_from_pipeline() -> str:
     """Fetch live metrics directly from the collector in the same network."""
     try:
@@ -556,6 +548,11 @@ def fetch_from_pipeline() -> str:
         return r.text
     except Exception:
         return "No data in pipeline yet..."
+
+
+def fetch_pipeline_data() -> str:
+    """Local helper to display the live pipeline stream."""
+    return fetch_from_pipeline()
 
 
 def _generate_raw_api_key() -> str:
