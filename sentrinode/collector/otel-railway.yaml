@@ -3,6 +3,7 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
+        include_metadata: true
 
 processors:
   batch: {}
@@ -10,17 +11,32 @@ processors:
 exporters:
   logging:
     verbosity: detailed
+    sampling_initial: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:0}
+    sampling_thereafter: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:0}
+  otlphttp/ingest:
+    endpoint: "${INGEST_ENDPOINT:http://sentrinode-ingest:8000}"
+    traces_endpoint: "${INGEST_TRACES_ENDPOINT:http://sentrinode-ingest:8000/v1/otlp/traces}"
+    metrics_endpoint: "${INGEST_METRICS_ENDPOINT:http://sentrinode-ingest:8000/v1/otlp/metrics}"
+    headers:
+      X-Tenant-Id: "${X_TENANT_ID:}"
+      X-SentriNode-Key: "${X_SENTRINODE_KEY:}"
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 2048
+    retry_on_failure:
+      enabled: true
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [otlphttp/ingest, logging]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [otlphttp/ingest, logging]
     logs:
       receivers: [otlp]
       processors: [batch]

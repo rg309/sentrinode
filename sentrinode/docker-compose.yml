@@ -20,17 +20,43 @@ services:
     image: otel/opentelemetry-collector-contrib:0.94.0
     container_name: sentrinode-agent
     command: ["--config=/etc/otel/config.yaml"]
+    depends_on:
+      - sentrinode-ingest
     env_file:
       - .env
     environment:
       API_KEY: ${API_KEY:-}
-      SENTRINODE_OTLP_ENDPOINT: ${SENTRINODE_OTLP_ENDPOINT:-host.docker.internal:4317}
+      INGEST_ENDPOINT: ${INGEST_ENDPOINT:-http://sentrinode-ingest:8000}
+      INGEST_TRACES_ENDPOINT: ${INGEST_TRACES_ENDPOINT:-http://sentrinode-ingest:8000/v1/otlp/traces}
+      INGEST_METRICS_ENDPOINT: ${INGEST_METRICS_ENDPOINT:-http://sentrinode-ingest:8000/v1/otlp/metrics}
+      X_TENANT_ID: ${X_TENANT_ID:-local-tenant}
+      X_SENTRINODE_KEY: ${X_SENTRINODE_KEY:-local-dev-key}
+      SENTRINODE_DEBUG_LOGGING_SAMPLES: ${SENTRINODE_DEBUG_LOGGING_SAMPLES:-0}
     volumes:
-      - ./otel-config.yaml:/etc/otel/config.yaml:ro
+      - ./collector/otel-railway.yaml:/etc/otel/config.yaml:ro
     ports:
       - "4317:4317"
       - "4318:4318"
       - "14268:14268"
+    restart: unless-stopped
+    networks:
+      - sentrinode-network
+
+  sentrinode-ingest:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    container_name: sentrinode-ingest
+    env_file:
+      - .env
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      MAX_BODY_BYTES: ${INGEST_MAX_BODY_BYTES:-5242880}
+      NODE_TTL_SECONDS: ${INGEST_NODE_TTL_SECONDS:-900}
+      MAX_NODES_PER_TENANT: ${INGEST_MAX_NODES_PER_TENANT:-500}
+    ports:
+      - "8000:8000"
     restart: unless-stopped
     networks:
       - sentrinode-network

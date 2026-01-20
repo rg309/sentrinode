@@ -1,14 +1,19 @@
+import base64
+import hashlib
 import json
 import os
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-import pandas as pd
-import streamlit as st
 import numpy as np
+import pandas as pd
 import plotly.express as px
+import requests
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 from supabase import Client, create_client
 
 try:
@@ -90,9 +95,20 @@ if "dashboard_time_range" not in st.session_state:
     st.session_state.dashboard_time_range = "Last 1 hour"
 if "dashboard_demo" not in st.session_state:
     st.session_state.dashboard_demo = False
+if "tenant_id" not in st.session_state:
+    st.session_state.tenant_id = ""
+if "active_tenant_slug" not in st.session_state:
+    st.session_state.active_tenant_slug = ""
+if "active_tenant_id" not in st.session_state:
+    st.session_state.active_tenant_id = None
+if "ingest_raw_key" not in st.session_state:
+    st.session_state.ingest_raw_key = ""
+if "tenant_memberships" not in st.session_state:
+    st.session_state.tenant_memberships = []
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
@@ -275,6 +291,228 @@ def _supabase_client() -> Client | None:
             return None
         _supabase_client_instance = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     return _supabase_client_instance
+
+
+def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
+    if not access_token:
+        return {}
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "apikey": SUPABASE_ANON_KEY or "",
+    }
+
+
+def _fetch_user_tenants(access_token: str | None) -> tuple[list[dict[str, Any]], str | None]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return [], "Supabase credentials missing."
+    if not access_token:
+        return [], "No user session found."
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/tenant_members",
+            headers=_supabase_user_headers(access_token),
+            params={"select": "tenant_id,role,tenants(id,slug,name)"},
+            timeout=6,
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return [], f"Failed to load tenants: {exc}"
+    if res.status_code != 200:
+        return [], f"Supabase responded with {res.status_code}: {res.text}"
+    rows = res.json() if res.text else []
+    memberships: list[dict[str, Any]] = []
+    for row in rows:
+        tenant = row.get("tenants") or {}
+        memberships.append(
+            {
+                "tenant_id": row.get("tenant_id") or tenant.get("id"),
+                "tenant_slug": tenant.get("slug"),
+                "tenant_name": tenant.get("name") or tenant.get("slug"),
+                "role": row.get("role"),
+            }
+        )
+    return memberships, None
+
+
+def _set_active_tenant(slug: str | None, tenant_id: Any | None) -> None:
+    st.session_state.active_tenant_slug = (slug or "").strip()
+    st.session_state.active_tenant_id = tenant_id
+
+
+def _create_api_key_record(access_token: str | None, tenant_id: Any, name: str) -> tuple[bool, str | None, str | None]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return False, None, "Supabase credentials missing."
+    if not access_token:
+        return False, None, "No user session found."
+    raw_key = _generate_raw_api_key()
+    payload = {
+        "tenant_id": tenant_id,
+        "name": name or "Ingest key",
+        "key_hash": _hash_api_key(raw_key),
+        "key_last4": raw_key[-4:],
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    try:
+        res = requests.post(
+            f"{SUPABASE_URL}/rest/v1/api_keys",
+            headers={**_supabase_user_headers(access_token), "Content-Type": "application/json"},
+            json=payload,
+            timeout=6,
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return False, None, f"Failed to create key: {exc}"
+    if res.status_code not in (200, 201):
+        return False, None, f"Supabase responded with {res.status_code}: {res.text}"
+    return True, raw_key, None
+
+
+def _fetch_api_keys_user(access_token: str | None, tenant_id: Any) -> tuple[list[dict[str, Any]], str | None]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return [], "Supabase credentials missing."
+    if not access_token:
+        return [], "No user session found."
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/api_keys",
+            headers=_supabase_user_headers(access_token),
+            params={"select": "*", "tenant_id": f"eq.{tenant_id}", "order": "created_at.desc"},
+            timeout=6,
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return [], f"Failed to load keys: {exc}"
+    if res.status_code != 200:
+        return [], f"Supabase responded with {res.status_code}: {res.text}"
+    return res.json() if res.text else [], None
+
+
+def _revoke_api_key_user(access_token: str | None, key_id: Any) -> tuple[bool, str | None]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return False, "Supabase credentials missing."
+    if not access_token:
+        return False, "No user session found."
+    try:
+        res = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/api_keys",
+            headers={**_supabase_user_headers(access_token), "Content-Type": "application/json"},
+            params={"id": f"eq.{key_id}"},
+            json={"revoked_at": datetime.utcnow().isoformat()},
+            timeout=6,
+        )
+    except Exception as exc:  # pragma: no cover - network
+        return False, f"Failed to revoke key: {exc}"
+    if res.status_code not in (200, 204):
+        return False, f"Supabase responded with {res.status_code}: {res.text}"
+    return True, None
+
+
+def _ingest_auth_headers() -> tuple[dict[str, str], str | None]:
+    tenant_slug = (st.session_state.get("active_tenant_slug") or "").strip()
+    api_key = (st.session_state.get("ingest_raw_key") or "").strip()
+    if not tenant_slug:
+        return {}, "Set an active tenant in Account Settings."
+    if not api_key:
+        return {}, "Provide a raw API key to query ingest."
+    return {"X-Tenant-Id": tenant_slug, "X-SentriNode-Key": api_key}, None
+
+
+def _ingest_get(path: str) -> tuple[dict[str, Any] | None, str | None]:
+    headers, err = _ingest_auth_headers()
+    if err:
+        return None, err
+    url = f"{INGEST_BASE_URL}{path}"
+    try:
+        res = requests.get(url, headers=headers, timeout=6)
+    except Exception as exc:  # pragma: no cover - network
+        return None, f"Ingest request failed: {exc}"
+    if res.status_code != 200:
+        return None, f"Ingest responded with {res.status_code}: {res.text}"
+    return res.json() if res.text else {}, None
+
+
+def _fetch_nodes_from_ingest() -> tuple[list[dict[str, Any]], str | None]:
+    tenant_slug = (st.session_state.get("active_tenant_slug") or "").strip()
+    if not tenant_slug:
+        return [], "Select a tenant to load node data."
+    data, err = _ingest_get(f"/v1/tenants/{tenant_slug}/nodes")
+    if err:
+        return [], err
+    nodes = data.get("nodes") if isinstance(data, dict) else []
+    return nodes or [], None
+
+
+def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | None]:
+    tenant_slug = (st.session_state.get("active_tenant_slug") or "").strip()
+    if not tenant_slug:
+        return None, "Select a tenant to load node details."
+    data, err = _ingest_get(f"/v1/tenants/{tenant_slug}/nodes/{node_name}")
+    if err:
+        return None, err
+    return data or {}, None
+
+
+def _generate_raw_api_key() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
+
+
+def _hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def _persist_tenant_id(client: Client | None, tenant_id: str) -> str:
+    user = st.session_state.get("user")
+    user_id = getattr(user, "id", None)
+    if not client:
+        return "Supabase client unavailable."
+    if not tenant_id:
+        return "Tenant ID cleared locally."
+    if not user_id:
+        return "User session missing; cannot persist tenant."
+    try:
+        client.table("profiles").upsert({"id": user_id, "tenant_id": tenant_id}).execute()
+        return "Tenant ID saved to Supabase profile."
+    except Exception as exc:  # pragma: no cover - network
+        return f"Could not persist tenant ID (table missing?): {exc}"
+
+
+def _insert_api_key_record(
+    client: Client | None, tenant_id: str, name: str, key_hash: str, key_last4: str
+) -> tuple[bool, str]:
+    if not client:
+        return False, "Supabase client unavailable."
+    payload = {
+        "tenant_id": tenant_id,
+        "name": name,
+        "key_hash": key_hash,
+        "key_last4": key_last4,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    try:
+        client.table("api_keys").insert(payload).execute()
+        return True, ""
+    except Exception as exc:  # pragma: no cover - network
+        return False, str(exc)
+
+
+def _fetch_api_keys(client: Client | None, tenant_id: str) -> tuple[list[dict[str, Any]], str | None]:
+    if not client:
+        return [], "Supabase client unavailable."
+    if not tenant_id:
+        return [], "Set a tenant ID to view keys."
+    try:
+        res = client.table("api_keys").select("*").eq("tenant_id", tenant_id).order("created_at", desc=True).execute()
+        rows = getattr(res, "data", None) or []
+        return rows, None
+    except Exception as exc:  # pragma: no cover - network
+        return [], str(exc)
+
+
+def _revoke_api_key_record(client: Client | None, key_id: Any) -> tuple[bool, str]:
+    if not client:
+        return False, "Supabase client unavailable."
+    try:
+        client.table("api_keys").update({"revoked_at": datetime.utcnow().isoformat()}).eq("id", key_id).execute()
+        return True, ""
+    except Exception as exc:  # pragma: no cover - network
+        return False, str(exc)
 
 
 def _handle_auth_success(
@@ -506,6 +744,7 @@ def show_login(client: Client | None = None) -> None:
                 toast_message="Console unlocked. Welcome back.",
                 toast_icon="✅",
             )
+            st.rerun()
         else:
             st.error("Login failed.")
 
@@ -552,6 +791,7 @@ def show_signup(client: Client | None = None) -> None:
                         toast_message="Account created and signed in.",
                         toast_icon="🎉",
                     )
+                    st.rerun()
                 else:
                     st.success("Account created. Check your email to confirm, then sign in.")
 
@@ -663,6 +903,7 @@ def render_schema_inventory() -> None:
 
 
 def render_admin_dashboard() -> None:
+    st_autorefresh(interval=2000, key="admin_dashboard_refresh")
     st.info("Temporarily disabled while storage is being migrated.")
 
 
@@ -957,7 +1198,132 @@ def _render_node_drilldown(filters: FilterContext) -> None:
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    st.info("Temporarily disabled while storage is being migrated.")
+    st_autorefresh(interval=2000, key="node_manager_refresh")
+    st.text_input("Tenant slug", key="active_tenant_slug")
+    st.text_input("Raw API key (header X-SentriNode-Key)", key="ingest_raw_key", type="password")
+
+    nodes, err = _fetch_nodes_from_ingest()
+    if err:
+        st.warning(err)
+        return
+    if not nodes:
+        st.info("No nodes observed yet for this tenant.")
+        return
+
+    for node in nodes:
+        ts = node.get("last_seen")
+        if ts:
+            try:
+                node["last_seen_readable"] = datetime.fromisoformat(ts).strftime("%Y-%m-%d %H:%M:%S UTC")
+            except Exception:
+                node["last_seen_readable"] = ts
+        else:
+            node["last_seen_readable"] = "n/a"
+
+    df = pd.DataFrame(nodes)
+    display_cols = [col for col in ["node_name", "last_seen_readable"] if col in df.columns]
+    st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
+    node_names = [n.get("node_name") for n in nodes if n.get("node_name")]
+    if not node_names:
+        st.info("No node identifiers available yet.")
+        return
+    default_index = node_names.index(st.session_state.get("selected_node")) if st.session_state.get("selected_node") in node_names else 0
+    selected_node = st.selectbox("Select node", node_names, index=default_index if node_names else 0)
+    st.session_state.selected_node = selected_node
+
+    if selected_node:
+        detail, detail_err = _fetch_node_detail(selected_node)
+        if detail_err:
+            st.error(detail_err)
+            return
+        st.markdown(f"#### {selected_node}")
+        st.caption(f"Last seen: {detail.get('last_seen', 'n/a')}")
+        metrics = detail.get("metrics") or {}
+        if metrics:
+            metric_items = list(metrics.items())
+            cols = st.columns(min(4, len(metric_items)))
+            for idx, (key, value) in enumerate(metric_items):
+                cols[idx % len(cols)].metric(key, value)
+        else:
+            st.info("No metrics reported yet for this node.")
+        attrs = detail.get("attributes") or {}
+        if attrs:
+            st.markdown("##### Attributes")
+            st.json(attrs)
+
+
+def show_api_keys() -> None:
+    st.header("API Keys")
+    st.caption("Generate tenant-scoped ingest keys. Raw keys are only shown once and stored hashed.")
+    access_token = st.session_state.get("access_token")
+    tenant_id = st.session_state.get("active_tenant_id")
+    tenant_slug = (st.session_state.get("active_tenant_slug") or "").strip()
+
+    if not tenant_id or not tenant_slug:
+        memberships, err = _fetch_user_tenants(access_token)
+        if memberships:
+            first = memberships[0]
+            _set_active_tenant(first.get("tenant_slug"), first.get("tenant_id"))
+            tenant_id = first.get("tenant_id")
+            tenant_slug = first.get("tenant_slug") or ""
+        elif err:
+            st.warning(err)
+
+    st.text_input("Active tenant slug", key="active_tenant_slug")
+    st.text_input("Raw API key (header X-SentriNode-Key)", key="ingest_raw_key", type="password")
+
+    if not tenant_id or not tenant_slug:
+        st.warning("Set an active tenant in Account Settings.")
+        return
+
+    st.subheader("Generate API key")
+    with st.form("generate_key_form"):
+        key_name = st.text_input("Name", value="Ingest key", key="api_keys_key_name")
+        generate_clicked = st.form_submit_button("Generate API key")
+    if generate_clicked:
+        ok, raw_key, err = _create_api_key_record(access_token, tenant_id, key_name)
+        if ok and raw_key:
+            st.session_state["latest_raw_api_key"] = raw_key
+            st.session_state.ingest_raw_key = raw_key
+            st.success("API key created. Copy it now; it will only be shown once.")
+        else:
+            st.error(err or "Failed to create API key.")
+
+    raw_key_once = st.session_state.pop("latest_raw_api_key", None)
+    if raw_key_once:
+        st.warning("Copy this key now. It is not stored and will disappear on refresh.", icon="⚠️")
+        st.code(raw_key_once, language="")
+
+    st.subheader("Existing keys")
+    keys, fetch_err = _fetch_api_keys_user(access_token, tenant_id)
+    if fetch_err:
+        st.warning(fetch_err)
+    elif not keys:
+        st.info("No API keys found for this tenant yet.")
+    else:
+        for idx, row in enumerate(keys):
+            status = "revoked" if row.get("revoked_at") else "active"
+            key_id = row.get("id", idx)
+            cols = st.columns([3, 2, 2, 2, 2])
+            cols[0].markdown(f"**{row.get('name') or 'Unnamed key'}**")
+            cols[1].text(f"Last 4: {row.get('key_last4') or '????'}")
+            cols[2].text(f"Created: {row.get('created_at') or 'n/a'}")
+            cols[3].text(f"Status: {status}")
+            if status == "active" and row.get("id") is not None:
+                if cols[4].button("Revoke", key=f"revoke_{key_id}"):
+                    ok, err = _revoke_api_key_user(access_token, row["id"])
+                    if ok:
+                        st.success(f"Key ending {row.get('key_last4') or ''} revoked.")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to revoke key: {err}")
+            else:
+                cols[4].text("Revoked")
+
+    st.subheader("Example ingest headers")
+    tenant_example = tenant_slug or "<tenant_slug>"
+    st.code(f"X-Tenant-Id: {tenant_example}\nX-SentriNode-Key: <raw_key>", language="")
 
 
 def show_dashboard():
@@ -975,14 +1341,96 @@ def show_dashboard():
 # --- SETTINGS LOGIC ---
 def show_settings():
     st.header("Account Settings")
-    st.info("Temporarily disabled while storage is being migrated.")
+    access_token = st.session_state.get("access_token")
+    memberships, err = _fetch_user_tenants(access_token)
+    if err:
+        st.error(err)
+        return
+    if memberships != st.session_state.get("tenant_memberships"):
+        st.session_state.tenant_memberships = memberships
+    options = {m["tenant_slug"]: m for m in memberships if m.get("tenant_slug")}
+    if options:
+        default_slug = (
+            st.session_state.get("active_tenant_slug")
+            or next(iter(options.keys()))
+        )
+        selected_slug = st.selectbox(
+            "Active tenant",
+            list(options.keys()),
+            index=list(options.keys()).index(default_slug) if default_slug in options else 0,
+        )
+        selected = options.get(selected_slug)
+        _set_active_tenant(selected.get("tenant_slug"), selected.get("tenant_id"))
+        st.caption(f"Role: {selected.get('role') or 'member'} • Tenant ID: {selected.get('tenant_id')}")
+    else:
+        st.info("No tenant memberships found for this account.")
+
+    st.subheader("Ingest session credentials")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.text_input("Tenant slug", key="active_tenant_slug")
+    with col2:
+        st.text_input("Raw API key (header X-SentriNode-Key)", key="ingest_raw_key", type="password")
+    st.caption("Stored only in this session. Required for dashboard polling against ingest.")
+
+    st.subheader("API Keys")
+    tenant_id = st.session_state.get("active_tenant_id")
+    tenant_slug = (st.session_state.get("active_tenant_slug") or "").strip()
+    if not tenant_id or not tenant_slug:
+        st.warning("Select a tenant to manage API keys.")
+        return
+
+    with st.form("generate_key_form_settings"):
+        key_name = st.text_input("Key name", value="Ingest key", key="settings_key_name")
+        gen_clicked = st.form_submit_button("Generate API key")
+    if gen_clicked:
+        ok, raw_key, msg = _create_api_key_record(access_token, tenant_id, key_name)
+        if ok and raw_key:
+            st.session_state["latest_raw_api_key"] = raw_key
+            st.session_state.ingest_raw_key = raw_key
+            st.success("API key created. Copy it now; it will only be shown once.")
+        else:
+            st.error(msg or "Failed to create API key.")
+
+    raw_key_once = st.session_state.pop("latest_raw_api_key", None)
+    if raw_key_once:
+        st.warning("Copy this key now. It will disappear on refresh.", icon="⚠️")
+        st.code(raw_key_once, language="")
+
+    keys, fetch_err = _fetch_api_keys_user(access_token, tenant_id)
+    if fetch_err:
+        st.error(fetch_err)
+    elif not keys:
+        st.info("No API keys yet for this tenant.")
+    else:
+        for idx, row in enumerate(keys):
+            status = "revoked" if row.get("revoked_at") else "active"
+            cols = st.columns([3, 2, 2, 2, 2])
+            cols[0].markdown(f"**{row.get('name') or 'Unnamed key'}**")
+            cols[1].text(f"Last 4: {row.get('key_last4') or '????'}")
+            cols[2].text(f"Created: {row.get('created_at') or 'n/a'}")
+            cols[3].text(f"Status: {status}")
+            if status == "active" and row.get("id") is not None:
+                if cols[4].button("Revoke", key=f"settings_revoke_{row['id']}_{idx}"):
+                    ok, err_msg = _revoke_api_key_user(access_token, row["id"])
+                    if ok:
+                        st.success("Key revoked.")
+                        st.rerun()
+                    else:
+                        st.error(err_msg or "Failed to revoke key.")
+            else:
+                cols[4].text("Revoked")
+
+    st.subheader("Example ingest headers")
+    tenant_example = tenant_slug or "<tenant_slug>"
+    st.code(f"X-Tenant-Id: {tenant_example}\nX-SentriNode-Key: <raw_key>", language="")
 
 
 # --- MAIN NAVIGATION ---
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
     render_auth_portal()
 else:
-    sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "Settings"))
+    sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "API Keys", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
@@ -996,5 +1444,7 @@ else:
         show_dashboard()
     elif sidebar_option == "Node Manager":
         show_node_manager()
+    elif sidebar_option == "API Keys":
+        show_api_keys()
     else:
         show_settings()
