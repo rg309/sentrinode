@@ -13,6 +13,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py /app/app.py
+RUN python -m py_compile /app/app.py
 
 EXPOSE 8501
 
