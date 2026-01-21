@@ -518,38 +518,15 @@ def _fetch_live_pipeline_data(url: str | None = None) -> dict[str, Any]:
         res = requests.get(target, timeout=5)
         res.raise_for_status()
         raw_text = res.text
-    except Exception:
-        raw_text = ""
+    except Exception as exc:  # pragma: no cover - network
+        return {
+            "kpis": {"p50": 0.0, "p95": 0.0, "error_rate": 0.0, "rpm": 0.0},
+            "latency": pd.DataFrame(),
+            "top_services": pd.DataFrame(),
+            "events": pd.DataFrame({"timestamp": [datetime.utcnow()], "event": [f"Pipeline fetch failed: {exc}"], "status": ["error"]}),
+        }
 
-    metrics_map = _parse_prometheus_metrics(raw_text) if raw_text else {}
-    latency_p50 = metrics_map.get("latency_p50_ms", 0.0)
-    latency_p95 = metrics_map.get("latency_p95_ms", metrics_map.get("rpc_server_duration_seconds_sum", 0.0))
-    rpm = metrics_map.get("calls_total", metrics_map.get("requests_total", 0.0))
-    error_rate = metrics_map.get("error_rate", 0.0)
-
-    kpis = {"p50": latency_p50, "p95": latency_p95, "error_rate": error_rate, "rpm": rpm}
-    now = datetime.utcnow()
-    latency_df = pd.DataFrame(
-        {
-            "timestamp": [now],
-            "latency_p50": [latency_p50],
-            "latency_p95": [latency_p95],
-        }
-    )
-    top_services = pd.DataFrame(
-        {
-            "Service": list(metrics_map.keys())[:5] if metrics_map else [],
-            "p95_latency_ms": list(metrics_map.values())[:5] if metrics_map else [],
-        }
-    )
-    events = pd.DataFrame(
-        {
-            "timestamp": [now],
-            "event": ["Pipeline scrape"],
-            "status": ["ok" if raw_text else "offline"],
-        }
-    )
-    return {"kpis": kpis, "latency": latency_df, "top_services": top_services, "events": events}
+    return _parse_spanmetrics(raw_text)
 
 
 def get_live_pipeline_metrics(url: str | None = None) -> str:
@@ -576,6 +553,109 @@ def fetch_from_pipeline() -> str:
 def fetch_pipeline_data() -> str:
     """Local helper to display the live pipeline stream."""
     return fetch_from_pipeline()
+
+
+def _parse_labels(label_blob: str) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    if not label_blob:
+        return labels
+    for pair in label_blob.split(","):
+        if "=" not in pair:
+            continue
+        k, v = pair.split("=", 1)
+        labels[k.strip()] = v.strip().strip('"')
+    return labels
+
+
+def _parse_spanmetrics(text: str) -> dict[str, Any]:
+    calls_entries: list[tuple[dict[str, str], float]] = []
+    duration_buckets: dict[frozenset[tuple[str, str]], list[tuple[float, float]]] = {}
+    duration_sum: dict[frozenset[tuple[str, str]], float] = {}
+    duration_count: dict[frozenset[tuple[str, str]], float] = {}
+
+    for line in text.splitlines():
+        if not line or line.startswith("#") or " " not in line:
+            continue
+        metric_part, value_part = line.split(None, 1)
+        try:
+            value = float(value_part.strip().split()[0])
+        except ValueError:
+            continue
+        if "{" in metric_part:
+            name, label_blob = metric_part.split("{", 1)
+            label_blob = label_blob.rstrip("}")
+            labels = _parse_labels(label_blob)
+        else:
+            name, labels = metric_part, {}
+
+        key_items = tuple(sorted((k, v) for k, v in labels.items() if k != "le"))
+        key = frozenset(key_items)
+
+        if name in ("calls", "calls_total"):
+            calls_entries.append((labels, value))
+        elif name.startswith("duration_bucket"):
+            le_val = labels.get("le")
+            if le_val is None:
+                continue
+            try:
+                le = float(le_val)
+            except ValueError:
+                continue
+            duration_buckets.setdefault(key, []).append((le, value))
+        elif name.startswith("duration_sum"):
+            duration_sum[key] = value
+        elif name.startswith("duration_count"):
+            duration_count[key] = value
+
+    now = datetime.utcnow()
+    rows = []
+    total_calls = 0.0
+    total_errors = 0.0
+    for labels, count in calls_entries:
+        service = labels.get("service.name") or "unknown"
+        span_name = labels.get("span.name") or labels.get("operation") or "span"
+        status = labels.get("status.code") or labels.get("status_code") or ""
+        total_calls += count
+        if status and status.lower() != "ok":
+            total_errors += count
+        rows.append(
+            {
+                "service": service,
+                "span": span_name,
+                "status": status or "unset",
+                "calls": count,
+            }
+        )
+
+    p95_ms = 0.0
+    for key, buckets in duration_buckets.items():
+        total = duration_count.get(key, 0.0)
+        if total <= 0:
+            continue
+        buckets_sorted = sorted(buckets, key=lambda x: x[0])
+        threshold = 0.95 * total
+        cumulative = 0.0
+        est = buckets_sorted[-1][0]
+        for le, val in buckets_sorted:
+            cumulative = val
+            if cumulative >= threshold:
+                est = le
+                break
+        p95_ms = max(p95_ms, est * 1000.0)
+
+    error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0.0
+    kpis = {"p50": 0.0, "p95": p95_ms, "error_rate": error_rate, "rpm": total_calls}
+
+    latency_df = pd.DataFrame({"timestamp": [now], "latency_p50": [0.0], "latency_p95": [p95_ms]})
+    top_services = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "span", "status", "calls"])
+    events = pd.DataFrame(
+        {
+            "timestamp": [now],
+            "event": ["Pipeline scrape"],
+            "status": ["ok"],
+        }
+    )
+    return {"kpis": kpis, "latency": latency_df, "top_services": top_services, "events": events}
 
 
 def _generate_raw_api_key() -> str:
@@ -1039,11 +1119,13 @@ def render_admin_dashboard() -> None:
 
 
 def render_user_dashboard(username: str) -> None:
+    st_autorefresh(interval=5000, key="dashboard_autorefresh")
     st.title("Dashboard")
     subtitle = getattr(st.session_state.get("user"), "email", None) or username or "user"
     st.caption(subtitle)
     time_label, start, end = _selected_time_range()
     demo_enabled = st.checkbox("Demo mode", value=st.session_state.get("dashboard_demo", False), key="dashboard_demo")
+    st.button("Refresh metrics", key="refresh_metrics")
     if demo_enabled:
         data = _generate_demo_dashboard_data(start, end)
     else:
