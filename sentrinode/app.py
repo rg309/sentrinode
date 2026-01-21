@@ -314,6 +314,7 @@ def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
 
 
 def _show_pipeline_debug_sidebar() -> None:
+    st.sidebar.header("Debug")
     st.sidebar.write("PIPELINE_METRICS_URL:", LIVE_PIPELINE_METRICS_URL or "(not set)")
     if not LIVE_PIPELINE_METRICS_URL:
         st.sidebar.write("metrics status:", "not set")
@@ -1647,6 +1648,7 @@ def show_settings():
 
 # --- MAIN NAVIGATION ---
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
+    _show_pipeline_debug_sidebar()
     render_auth_portal()
 else:
     _show_pipeline_debug_sidebar()
