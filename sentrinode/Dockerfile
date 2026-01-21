@@ -4,6 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+ARG CACHE_BUST=1
+RUN echo "cache bust $CACHE_BUST"
+
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
