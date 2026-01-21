@@ -303,6 +303,19 @@ def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
     }
 
 
+def _show_pipeline_debug_sidebar() -> None:
+    st.sidebar.write("PIPELINE_METRICS_URL:", LIVE_PIPELINE_METRICS_URL or "(not set)")
+    if not LIVE_PIPELINE_METRICS_URL:
+        st.sidebar.write("metrics status:", "not set")
+        return
+    try:
+        r = requests.get(LIVE_PIPELINE_METRICS_URL, timeout=5)
+        st.sidebar.write("metrics status:", r.status_code)
+        st.sidebar.write("metrics preview:", (r.text or "")[:300])
+    except Exception as exc:  # pragma: no cover - network
+        st.sidebar.write("metrics error:", repr(exc))
+
+
 def _fetch_user_tenants(access_token: str | None) -> tuple[list[dict[str, Any]], str | None]:
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         return [], "Supabase credentials missing."
@@ -1544,6 +1557,7 @@ def show_settings():
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
     render_auth_portal()
 else:
+    _show_pipeline_debug_sidebar()
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "API Keys", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):
