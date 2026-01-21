@@ -110,6 +110,16 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
 LIVE_PIPELINE_METRICS_URL = os.getenv("PIPELINE_METRICS_URL") or "http://localhost:9464/metrics"
+print("PIPELINE_METRICS_URL =", LIVE_PIPELINE_METRICS_URL or "(not set)", flush=True)
+if LIVE_PIPELINE_METRICS_URL:
+    try:
+        _bootstrap_r = requests.get(LIVE_PIPELINE_METRICS_URL, timeout=5)
+        print("METRICS_STATUS =", _bootstrap_r.status_code, flush=True)
+        print("METRICS_HEAD =", (_bootstrap_r.text or "").replace("\n", "\\n")[:200], flush=True)
+    except Exception as _bootstrap_exc:  # pragma: no cover - startup probe
+        print("METRICS_ERROR =", repr(_bootstrap_exc), flush=True)
+else:
+    print("PIPELINE_METRICS_URL not set", flush=True)
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
