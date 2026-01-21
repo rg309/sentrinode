@@ -3,52 +3,21 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
-        include_metadata: true
-  jaeger:
-    protocols:
-      thrift_http:
-        endpoint: 0.0.0.0:14268
-  zipkin:
-    endpoint: 0.0.0.0:9411
-
-processors:
-  batch: {}
-  tail_sampling:
-    decision_wait: 10s
-    num_traces: 100
-    policies:
-      - name: high-latency-anomaly
-        type: latency
-        latency:
-          threshold_ms: 2000
 
 exporters:
-  logging:
+  prometheus:
+    endpoint: "0.0.0.0:${env:PORT}"
+  debug:
     verbosity: detailed
-  otlp/remote:
-    endpoint: "sentrinode-production.up.railway.app:443"
-    tls:
-      insecure: false
-    headers:
-      "x-sentrinode-key": "${API_KEY}"
 
 connectors:
-  spanmetrics:
-    histogram:
-      explicit:
-        buckets: [100ms, 500ms, 1s, 2s, 5s]
+  spanmetrics: {}
 
 service:
   pipelines:
     traces:
-      receivers: [otlp, jaeger, zipkin]
-      processors: [tail_sampling, batch]
-      exporters: [logging, spanmetrics, otlp/remote]
-    metrics:
-      receivers: [otlp, spanmetrics]
-      processors: [batch]
-      exporters: [logging, otlp/remote]
-    logs:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [logging, otlp/remote]
+      exporters: [spanmetrics, debug]
+    metrics:
+      receivers: [spanmetrics]
+      exporters: [prometheus, debug]
