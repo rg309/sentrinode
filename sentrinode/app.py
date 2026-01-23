@@ -114,16 +114,20 @@ LIVE_PIPELINE_METRICS_URL = (
     or "http://accomplished-creativity.railway.internal:9464/metrics"
 )
 print("BOOT_OK", flush=True)
-print("PIPELINE_METRICS_URL =", LIVE_PIPELINE_METRICS_URL or "(not set)", flush=True)
+print("PIPELINE_METRICS_URL=", os.getenv("PIPELINE_METRICS_URL", ""), flush=True)
+print("PIPELINE_METRICS_URL_RESOLVED=", LIVE_PIPELINE_METRICS_URL or "", flush=True)
+
 if LIVE_PIPELINE_METRICS_URL:
     try:
         _bootstrap_r = requests.get(LIVE_PIPELINE_METRICS_URL, timeout=5)
-        print("METRICS_STATUS =", _bootstrap_r.status_code, flush=True)
-        print("METRICS_HEAD =", (_bootstrap_r.text or "").replace("\n", "\\n")[:200], flush=True)
+        _head = (_bootstrap_r.text or "").replace("\n", "\\n")[:200]
+        print(f"METRICS_STATUS={_bootstrap_r.status_code}", flush=True)
+        print(f"METRICS_HEAD={_head}", flush=True)
     except Exception as _bootstrap_exc:  # pragma: no cover - startup probe
-        print("METRICS_ERROR =", repr(_bootstrap_exc), flush=True)
+        print(f"METRICS_ERROR={repr(_bootstrap_exc)}", flush=True)
 else:
-    print("PIPELINE_METRICS_URL not set", flush=True)
+    print("METRICS_ERROR='PIPELINE_METRICS_URL not set'", flush=True)
+
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
@@ -319,17 +323,73 @@ def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
 
 def _show_pipeline_debug_sidebar() -> None:
     st.sidebar.header("Debug")
-    st.sidebar.write("PIPELINE_METRICS_URL:", LIVE_PIPELINE_METRICS_URL or "(not set)")
-    if not LIVE_PIPELINE_METRICS_URL:
-        st.sidebar.write("metrics status:", "not set")
-        return
-    try:
-        r = requests.get(LIVE_PIPELINE_METRICS_URL, timeout=5)
-        st.sidebar.write("metrics status:", r.status_code)
-        st.sidebar.write("last fetch:", datetime.utcnow().isoformat() + "Z")
-        st.sidebar.write("metrics preview:", (r.text or "")[:300])
-    except Exception as exc:  # pragma: no cover - network
-        st.sidebar.write("metrics error:", repr(exc))
+
+    # Auto refresh the whole app every 5 seconds so we can see live fetches.
+    st_autorefresh(interval=5000, key="debug_panel_autorefresh")
+
+    target = (LIVE_PIPELINE_METRICS_URL or "").strip()
+    st.sidebar.write("PIPELINE_METRICS_URL:", target or "(not set)")
+
+    manual_refresh = st.sidebar.button("Refresh metrics", key="debug_refresh_metrics")
+
+    # Persist last fetch details in session_state so the debug panel proves what happened.
+    dbg = st.session_state.setdefault(
+        "pipeline_debug",
+        {
+            "last_fetch": None,
+            "status": None,
+            "error": None,
+            "preview": "",
+        },
+    )
+
+    def _has_metric(metric_name: str, blob: str) -> bool:
+        if not blob:
+            return False
+        return re.search(rf"^{re.escape(metric_name)}(\{{|\s)", blob, flags=re.MULTILINE) is not None
+
+    if target:
+        try:
+            r = requests.get(target, timeout=5)
+            text = r.text or ""
+            dbg["last_fetch"] = datetime.utcnow().isoformat() + "Z"
+            dbg["status"] = r.status_code
+            dbg["error"] = None
+            dbg["preview"] = text[:300]
+            dbg["has_calls"] = _has_metric("calls", text)
+            dbg["has_duration_bucket"] = _has_metric("duration_bucket", text)
+            dbg["has_duration_sum"] = _has_metric("duration_sum", text)
+            dbg["has_duration_count"] = _has_metric("duration_count", text)
+
+            # Keep the first 300 chars visible even if it contains newlines.
+            st.sidebar.write("last fetch time:", dbg["last_fetch"])
+            st.sidebar.write("status:", dbg["status"])
+            st.sidebar.write(
+                "spanmetrics present:",
+                {
+                    "calls": dbg.get("has_calls", False),
+                    "duration_bucket": dbg.get("has_duration_bucket", False),
+                    "duration_sum": dbg.get("has_duration_sum", False),
+                    "duration_count": dbg.get("has_duration_count", False),
+                },
+            )
+            st.sidebar.caption("metrics preview (first 300 chars)")
+            st.sidebar.code(dbg["preview"])
+        except Exception as exc:  # pragma: no cover - network
+            dbg["last_fetch"] = datetime.utcnow().isoformat() + "Z"
+            dbg["status"] = None
+            dbg["error"] = repr(exc)
+            dbg["preview"] = ""
+            st.sidebar.write("last fetch time:", dbg["last_fetch"])
+            st.sidebar.write("error:", dbg["error"])
+    else:
+        dbg["last_fetch"] = None
+        dbg["status"] = None
+        dbg["error"] = "PIPELINE_METRICS_URL not set"
+        dbg["preview"] = ""
+        st.sidebar.write("last fetch time:", "(not fetched)")
+        st.sidebar.write("error:", dbg["error"])
+
 
 
 def _fetch_user_tenants(access_token: str | None) -> tuple[list[dict[str, Any]], str | None]:
@@ -546,18 +606,23 @@ def get_live_pipeline_metrics(url: str | None = None) -> str:
         return f"Pipeline Offline: {exc}"
 
 
-def fetch_pipeline_data() -> str:
 def fetch_from_pipeline() -> str:
     """Fetch live metrics directly from the collector in the same network."""
-    url = LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics"
+    url = (LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics").strip()
+    if not url:
+        return "PIPELINE_METRICS_URL not set"
     try:
-        r = requests.get(url, timeout=1)
-        return r.text
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        return r.text or ""
     except Exception as exc:
         return f"No data in pipeline yet... ({exc})"
 
 
 def fetch_pipeline_data() -> str:
+    """Local helper to display the live pipeline stream."""
+    return fetch_from_pipeline()
+
     """Local helper to display the live pipeline stream."""
     return fetch_from_pipeline()
 
@@ -580,6 +645,10 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
     duration_sum: dict[frozenset[tuple[str, str]], float] = {}
     duration_count: dict[frozenset[tuple[str, str]], float] = {}
 
+    def _is_metric(found: str, canonical: str) -> bool:
+        return found == canonical or found.endswith("_" + canonical)
+
+
     for line in text.splitlines():
         if not line or line.startswith("#") or " " not in line:
             continue
@@ -598,9 +667,9 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
         key_items = tuple(sorted((k, v) for k, v in labels.items() if k != "le"))
         key = frozenset(key_items)
 
-        if name in ("calls", "calls_total"):
+        if _is_metric(name, "calls"):
             calls_entries.append((labels, value))
-        elif name.startswith("duration_bucket"):
+        elif _is_metric(name, "duration_bucket"):
             le_val = labels.get("le")
             if le_val is None:
                 continue
@@ -609,9 +678,9 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
             except ValueError:
                 continue
             duration_buckets.setdefault(key, []).append((le, value))
-        elif name.startswith("duration_sum"):
+        elif _is_metric(name, "duration_sum"):
             duration_sum[key] = value
-        elif name.startswith("duration_count"):
+        elif _is_metric(name, "duration_count"):
             duration_count[key] = value
 
     now = datetime.utcnow()
