@@ -120,6 +120,7 @@ if LIVE_PIPELINE_METRICS_URL:
         print("METRICS_ERROR =", repr(_bootstrap_exc), flush=True)
 else:
     print("PIPELINE_METRICS_URL not set", flush=True)
+print("BOOT_OK", flush=True)
 _supabase_client_instance: Client | None = None
 
 SCHEMA_DISCOVERY_QUERIES = [
@@ -322,6 +323,7 @@ def _show_pipeline_debug_sidebar() -> None:
     try:
         r = requests.get(LIVE_PIPELINE_METRICS_URL, timeout=5)
         st.sidebar.write("metrics status:", r.status_code)
+        st.sidebar.write("last fetch:", datetime.utcnow().isoformat() + "Z")
         st.sidebar.write("metrics preview:", (r.text or "")[:300])
     except Exception as exc:  # pragma: no cover - network
         st.sidebar.write("metrics error:", repr(exc))
@@ -544,11 +546,12 @@ def get_live_pipeline_metrics(url: str | None = None) -> str:
 def fetch_pipeline_data() -> str:
 def fetch_from_pipeline() -> str:
     """Fetch live metrics directly from the collector in the same network."""
+    url = LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics"
     try:
-        r = requests.get("http://sentrinode-agent:9464/metrics", timeout=1)
+        r = requests.get(url, timeout=1)
         return r.text
-    except Exception:
-        return "No data in pipeline yet..."
+    except Exception as exc:
+        return f"No data in pipeline yet... ({exc})"
 
 
 def fetch_pipeline_data() -> str:
