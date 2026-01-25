@@ -9,3 +9,5 @@ joblib>=1.4
 requests>=2.31
 python-dotenv>=1.0
 supabase>=2.4
+fastapi>=0.110
+uvicorn[standard]>=0.24
