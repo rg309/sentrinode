@@ -15,6 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py /app/app.py
 RUN python -m py_compile /app/app.py
 
-EXPOSE 8501
+EXPOSE 8080
 
-CMD ["sh","-c","streamlit run /app/app.py --server.address=0.0.0.0 --server.port=${PORT:-8080}"]
+CMD ["streamlit", "run", "/app/app.py", "--server.address=0.0.0.0", "--server.port=8080"]
