@@ -15,4 +15,4 @@ COPY api.py /app/api.py
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "exec ${FLY_PROCESS_GROUP}"]
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8080}"]
