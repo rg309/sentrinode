@@ -92,6 +92,11 @@ def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.head("/healthz")
+def healthz_head() -> Response:
+    return Response(status_code=200, media_type="application/json")
+
+
 @app.post("/ingest")
 async def ingest(request: Request) -> JSONResponse:
     global _CALLS_TOTAL
