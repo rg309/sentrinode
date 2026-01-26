@@ -10,6 +10,7 @@ app = "sentrinode"
 [[services]]
   internal_port = 8080
   protocol = "tcp"
+  processes = ["ui"]
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1

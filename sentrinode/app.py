@@ -109,12 +109,10 @@ if "tenant_memberships" not in st.session_state:
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
-LIVE_PIPELINE_METRICS_URL = (
-    os.getenv("PIPELINE_METRICS_URL")
-    or "http://accomplished-creativity.railway.internal:9464/metrics"
-)
+PIPELINE_METRICS_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip()
+LIVE_PIPELINE_METRICS_URL = PIPELINE_METRICS_URL
 print("BOOT_OK", flush=True)
-print("PIPELINE_METRICS_URL=", os.getenv("PIPELINE_METRICS_URL", ""), flush=True)
+print("PIPELINE_METRICS_URL=", PIPELINE_METRICS_URL, flush=True)
 print("PIPELINE_METRICS_URL_RESOLVED=", LIVE_PIPELINE_METRICS_URL or "", flush=True)
 
 if LIVE_PIPELINE_METRICS_URL:
@@ -126,7 +124,7 @@ if LIVE_PIPELINE_METRICS_URL:
     except Exception as _bootstrap_exc:  # pragma: no cover - startup probe
         print(f"METRICS_ERROR={repr(_bootstrap_exc)}", flush=True)
 else:
-    print("METRICS_ERROR='PIPELINE_METRICS_URL not set'", flush=True)
+    print("PIPELINE_METRICS_URL not set, skipping metrics fetch", flush=True)
 
 _supabase_client_instance: Client | None = None
 
@@ -385,8 +383,9 @@ def _show_pipeline_debug_sidebar() -> None:
     else:
         dbg["last_fetch"] = None
         dbg["status"] = None
-        dbg["error"] = "PIPELINE_METRICS_URL not set"
+        dbg["error"] = "Metrics source not configured"
         dbg["preview"] = ""
+        st.sidebar.info("Metrics source not configured. Set PIPELINE_METRICS_URL.")
         st.sidebar.write("last fetch time:", "(not fetched)")
         st.sidebar.write("error:", dbg["error"])
 
@@ -540,7 +539,9 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
 
 
 def fetch_live_pipeline() -> str:
-    url = "http://localhost:9464/metrics"
+    url = (LIVE_PIPELINE_METRICS_URL or "").strip()
+    if not url:
+        return "Metrics endpoint not configured."
     try:
         response = requests.get(url, timeout=1)
         return response.text
@@ -578,7 +579,16 @@ def _parse_prometheus_metrics(text: str) -> dict[str, float]:
 
 
 def _fetch_live_pipeline_data(url: str | None = None) -> dict[str, Any]:
-    target = (url or LIVE_PIPELINE_METRICS_URL or "").strip() or "http://localhost:9464/metrics"
+    target = (url or LIVE_PIPELINE_METRICS_URL or "").strip()
+    if not target:
+        return {
+            "kpis": {"p50": 0.0, "p95": 0.0, "error_rate": 0.0, "rpm": 0.0},
+            "latency": pd.DataFrame(),
+            "top_services": pd.DataFrame(),
+            "events": pd.DataFrame(
+                {"timestamp": [datetime.utcnow()], "event": ["Metrics endpoint not configured."], "status": ["info"]}
+            ),
+        }
     raw_text = ""
     try:
         res = requests.get(target, timeout=5)
@@ -597,7 +607,9 @@ def _fetch_live_pipeline_data(url: str | None = None) -> dict[str, Any]:
 
 def get_live_pipeline_metrics(url: str | None = None) -> str:
     """Expose a simple accessor for the live pipeline metrics endpoint."""
-    target = url or LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics"
+    target = (url or LIVE_PIPELINE_METRICS_URL or "").strip()
+    if not target:
+        return "PIPELINE_METRICS_URL not set"
     try:
         res = requests.get(target, timeout=2)
         res.raise_for_status()
@@ -608,7 +620,7 @@ def get_live_pipeline_metrics(url: str | None = None) -> str:
 
 def fetch_from_pipeline() -> str:
     """Fetch live metrics directly from the collector in the same network."""
-    url = (LIVE_PIPELINE_METRICS_URL or "http://localhost:9464/metrics").strip()
+    url = (LIVE_PIPELINE_METRICS_URL or "").strip()
     if not url:
         return "PIPELINE_METRICS_URL not set"
     try:

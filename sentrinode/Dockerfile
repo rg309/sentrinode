@@ -13,11 +13,11 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py /app/app.py
-COPY collector_app.py /app/collector_app.py
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-RUN python -m py_compile /app/app.py
+COPY api.py /app/api.py
+COPY start_api.sh /app/start_api.sh
+RUN chmod +x /app/start_api.sh
+RUN python -m py_compile /app/app.py /app/api.py
 
-EXPOSE 8080 9000
+EXPOSE 8080
 
-CMD ["/app/start.sh"]
+CMD ["sh","-c","streamlit run /app/app.py --server.address=0.0.0.0 --server.port=${PORT:-8080}"]
