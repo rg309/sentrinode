@@ -109,11 +109,23 @@ if "tenant_memberships" not in st.session_state:
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
-PIPELINE_METRICS_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip()
+
+def _resolve_pipeline_metrics_url(base_url: str) -> str:
+    if not base_url:
+        return ""
+    if base_url.endswith("/metrics"):
+        return base_url
+    return f"{base_url}/metrics"
+
+
+PIPELINE_BASE_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip().rstrip("/")
+PIPELINE_METRICS_URL = _resolve_pipeline_metrics_url(PIPELINE_BASE_URL)
+PIPELINE_INGEST_URL = f"{PIPELINE_BASE_URL}/ingest" if PIPELINE_BASE_URL else ""
 LIVE_PIPELINE_METRICS_URL = PIPELINE_METRICS_URL
 print("BOOT_OK", flush=True)
-print("PIPELINE_METRICS_URL=", PIPELINE_METRICS_URL, flush=True)
+print("PIPELINE_METRICS_URL=", PIPELINE_BASE_URL, flush=True)
 print("PIPELINE_METRICS_URL_RESOLVED=", LIVE_PIPELINE_METRICS_URL or "", flush=True)
+print("PIPELINE_INGEST_URL_RESOLVED=", PIPELINE_INGEST_URL or "", flush=True)
 
 if LIVE_PIPELINE_METRICS_URL:
     try:
@@ -319,13 +331,27 @@ def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
     }
 
 
+def _post_pipeline_event(payload: dict[str, Any]) -> tuple[bool, str | None]:
+    if not PIPELINE_INGEST_URL:
+        return False, "PIPELINE_METRICS_URL not set"
+    try:
+        res = requests.post(PIPELINE_INGEST_URL, json=payload, timeout=5)
+    except Exception as exc:  # pragma: no cover - network
+        return False, f"Failed to post event: {exc}"
+    if res.status_code not in (200, 202):
+        return False, f"Ingest responded with {res.status_code}: {res.text}"
+    return True, None
+
+
 def _show_pipeline_debug_sidebar() -> None:
     st.sidebar.header("Debug")
 
     # Auto refresh the whole app every 5 seconds so we can see live fetches.
     st_autorefresh(interval=5000, key="debug_panel_autorefresh")
 
+    base_target = (PIPELINE_BASE_URL or "").strip()
     target = (LIVE_PIPELINE_METRICS_URL or "").strip()
+    st.sidebar.write("PIPELINE_BASE_URL:", base_target or "(not set)")
     st.sidebar.write("PIPELINE_METRICS_URL:", target or "(not set)")
 
     manual_refresh = st.sidebar.button("Refresh metrics", key="debug_refresh_metrics")
@@ -373,6 +399,18 @@ def _show_pipeline_debug_sidebar() -> None:
             )
             st.sidebar.caption("metrics preview (first 300 chars)")
             st.sidebar.code(dbg["preview"])
+            if manual_refresh:
+                ok, err = _post_pipeline_event(
+                    {
+                        "source": "streamlit",
+                        "event": "metrics_refresh",
+                        "status": r.status_code,
+                    }
+                )
+                if ok:
+                    st.sidebar.success("Posted event to ingest.")
+                else:
+                    st.sidebar.warning(f"Ingest post failed: {err}")
         except Exception as exc:  # pragma: no cover - network
             dbg["last_fetch"] = datetime.utcnow().isoformat() + "Z"
             dbg["status"] = None
