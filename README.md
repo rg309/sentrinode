@@ -19,6 +19,30 @@ UI: `https://sentrinode.fly.dev`
 
 API: `https://sentrinode-api.fly.dev`
 
+### Telemetry load generator
+
+Start a simple load generator (posts once per second by default):
+
+```bash
+./loadgen.sh
+```
+
+Stop it with `Ctrl+C`.
+
+Override the target URL or interval:
+
+```bash
+INGEST_URL=https://sentrinode-api.fly.dev/ingest INTERVAL_SECONDS=0.5 ./loadgen.sh
+```
+
+Watch key metrics (prints every 2 seconds by default):
+
+```bash
+./watch_metrics.sh
+```
+
+Stop it with `Ctrl+C`.
+
 ### Metrics source (optional)
 
 Set `PIPELINE_METRICS_URL` to a Prometheus-compatible `/metrics` endpoint to enable live pipeline charts. If unset, the UI skips polling and shows that the metrics source is not configured.
