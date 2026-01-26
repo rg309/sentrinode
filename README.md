@@ -8,8 +8,8 @@
 ### Fly deploy
 
 ```bash
-fly deploy -c fly.sentrinode.toml
-fly deploy -c fly.sentrinode-api.toml
+fly deploy -a sentrinode -c fly.sentrinode.toml
+fly deploy -a sentrinode-api -c fly.sentrinode-api.toml
 ```
 
 

@@ -4,9 +4,20 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile.api"
 
-[http_service]
+[[services]]
   internal_port = 8080
-  force_https = true
+  protocol = "tcp"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[vm]
+  memory = "1024mb"
