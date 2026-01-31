@@ -105,6 +105,10 @@ if "ingest_raw_key" not in st.session_state:
     st.session_state.ingest_raw_key = ""
 if "tenant_memberships" not in st.session_state:
     st.session_state.tenant_memberships = []
+if "auto_refresh_enabled" not in st.session_state:
+    st.session_state.auto_refresh_enabled = True
+if "auto_refresh_interval_seconds" not in st.session_state:
+    st.session_state.auto_refresh_interval_seconds = 2
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -159,6 +163,21 @@ TIME_WINDOWS = {
 }
 
 MetricsPayload = dict[str, Any]
+
+
+def _setup_auto_refresh_controls() -> None:
+    st.sidebar.subheader("Auto refresh")
+    enabled = st.sidebar.toggle("Auto refresh", key="auto_refresh_enabled", value=True)
+    interval_seconds = st.sidebar.slider(
+        "Interval seconds",
+        min_value=1,
+        max_value=10,
+        value=int(st.session_state.get("auto_refresh_interval_seconds", 2)),
+        key="auto_refresh_interval_seconds",
+        disabled=not enabled,
+    )
+    if enabled:
+        st_autorefresh(interval=int(interval_seconds) * 1000, key="global_auto_refresh")
 
 NODE_KPI_QUERY = """
 MATCH (n:Node)
@@ -343,11 +362,22 @@ def _post_pipeline_event(payload: dict[str, Any]) -> tuple[bool, str | None]:
     return True, None
 
 
+def _extract_metric_names(text: str) -> set[str]:
+    names: set[str] = set()
+    if not text:
+        return names
+    for line in text.splitlines():
+        if not line or line.startswith("#") or " " not in line:
+            continue
+        metric_part = line.split(None, 1)[0]
+        name = metric_part.split("{", 1)[0]
+        if name:
+            names.add(name)
+    return names
+
+
 def _show_pipeline_debug_sidebar() -> None:
     st.sidebar.header("Debug")
-
-    # Auto refresh the whole app every 5 seconds so we can see live fetches.
-    st_autorefresh(interval=5000, key="debug_panel_autorefresh")
 
     base_target = (PIPELINE_BASE_URL or "").strip()
     target = (LIVE_PIPELINE_METRICS_URL or "").strip()
@@ -367,23 +397,53 @@ def _show_pipeline_debug_sidebar() -> None:
         },
     )
 
-    def _has_metric(metric_name: str, blob: str) -> bool:
-        if not blob:
-            return False
-        return re.search(rf"^{re.escape(metric_name)}(\{{|\s)", blob, flags=re.MULTILINE) is not None
+    def _detect_spanmetrics(metrics_text: str) -> dict[str, Any]:
+        names = _extract_metric_names(metrics_text)
+        calls_candidates = {"spanmetrics_calls_total", "spanmetrics_calls_created"}
+        matched_calls = sorted(n for n in names if n in calls_candidates)
+
+        # Generic histogram detection for spanmetrics_*_bucket with matching _sum/_count.
+        histogram_bases: dict[str, dict[str, bool]] = {}
+        for name in names:
+            if not name.startswith("spanmetrics_") or not name.endswith("_bucket"):
+                continue
+            base = name[: -len("_bucket")]
+            histogram_bases.setdefault(base, {"bucket": False, "sum": False, "count": False})
+            histogram_bases[base]["bucket"] = True
+        for base in list(histogram_bases.keys()):
+            if f"{base}_sum" in names:
+                histogram_bases[base]["sum"] = True
+            if f"{base}_count" in names:
+                histogram_bases[base]["count"] = True
+
+        matched_histograms = sorted(
+            base for base, flags in histogram_bases.items() if flags["bucket"] and flags["sum"] and flags["count"]
+        )
+
+        return {
+            "names": names,
+            "matched_calls": matched_calls,
+            "matched_histograms": matched_histograms,
+            "has_calls": bool(matched_calls),
+            "has_histogram": bool(matched_histograms),
+        }
 
     if target:
         try:
             r = requests.get(target, timeout=5)
             text = r.text or ""
+            _log_metrics_fetch(target, r.status_code, text)
             dbg["last_fetch"] = datetime.utcnow().isoformat() + "Z"
             dbg["status"] = r.status_code
             dbg["error"] = None
             dbg["preview"] = text[:300]
-            dbg["has_calls"] = _has_metric("calls", text)
-            dbg["has_duration_bucket"] = _has_metric("duration_bucket", text)
-            dbg["has_duration_sum"] = _has_metric("duration_sum", text)
-            dbg["has_duration_count"] = _has_metric("duration_count", text)
+            detected = _detect_spanmetrics(text)
+            dbg["has_calls"] = detected["has_calls"]
+            dbg["has_duration_bucket"] = detected["has_histogram"]
+            dbg["has_duration_sum"] = detected["has_histogram"]
+            dbg["has_duration_count"] = detected["has_histogram"]
+            dbg["matched_calls"] = detected["matched_calls"]
+            dbg["matched_histograms"] = detected["matched_histograms"]
 
             # Keep the first 300 chars visible even if it contains newlines.
             st.sidebar.write("last fetch time:", dbg["last_fetch"])
@@ -392,9 +452,14 @@ def _show_pipeline_debug_sidebar() -> None:
                 "spanmetrics present:",
                 {
                     "calls": dbg.get("has_calls", False),
-                    "duration_bucket": dbg.get("has_duration_bucket", False),
-                    "duration_sum": dbg.get("has_duration_sum", False),
-                    "duration_count": dbg.get("has_duration_count", False),
+                    "histogram": dbg.get("has_duration_bucket", False),
+                },
+            )
+            st.sidebar.write(
+                "matched spanmetrics series:",
+                {
+                    "calls": dbg.get("matched_calls", []),
+                    "histograms": dbg.get("matched_histograms", []),
                 },
             )
             st.sidebar.caption("metrics preview (first 300 chars)")
@@ -412,6 +477,8 @@ def _show_pipeline_debug_sidebar() -> None:
                 else:
                     st.sidebar.warning(f"Ingest post failed: {err}")
         except Exception as exc:  # pragma: no cover - network
+            status_code = getattr(locals().get("r", None), "status_code", None)
+            _log_metrics_fetch(target, status_code, getattr(locals().get("r", None), "text", "") or "")
             dbg["last_fetch"] = datetime.utcnow().isoformat() + "Z"
             dbg["status"] = None
             dbg["error"] = repr(exc)
@@ -576,14 +643,36 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
     return data or {}, None
 
 
+def _extract_calls_total(text: str) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"^spanmetrics_calls_total\s+([0-9eE+\-\.]+)\s*$", text, flags=re.MULTILINE)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _log_metrics_fetch(url: str, status_code: int | None, text: str) -> None:
+    calls_total = _extract_calls_total(text)
+    print(
+        f"METRICS_FETCH url={url or '(not set)'} status={status_code} calls_total={calls_total}",
+        flush=True,
+    )
+
+
 def fetch_live_pipeline() -> str:
     url = (LIVE_PIPELINE_METRICS_URL or "").strip()
     if not url:
         return "Metrics endpoint not configured."
     try:
         response = requests.get(url, timeout=1)
+        _log_metrics_fetch(url, response.status_code, response.text or "")
         return response.text
     except Exception:
+        _log_metrics_fetch(url, None, "")
         return "Collector Offline"
 
 
@@ -594,8 +683,11 @@ def fetch_live_pipeline_raw(url: str | None = None) -> str:
     try:
         res = requests.get(target, timeout=5)
         res.raise_for_status()
+        _log_metrics_fetch(target, res.status_code, res.text or "")
         return res.text
     except Exception as exc:  # pragma: no cover - network
+        status_code = getattr(locals().get("res", None), "status_code", None)
+        _log_metrics_fetch(target, status_code, getattr(locals().get("res", None), "text", "") or "")
         return f"Error connecting to pipeline: {exc}"
 
 
@@ -632,7 +724,10 @@ def _fetch_live_pipeline_data(url: str | None = None) -> dict[str, Any]:
         res = requests.get(target, timeout=5)
         res.raise_for_status()
         raw_text = res.text
+        _log_metrics_fetch(target, res.status_code, raw_text or "")
     except Exception as exc:  # pragma: no cover - network
+        status_code = getattr(locals().get("res", None), "status_code", None)
+        _log_metrics_fetch(target, status_code, getattr(locals().get("res", None), "text", "") or "")
         return {
             "kpis": {"p50": 0.0, "p95": 0.0, "error_rate": 0.0, "rpm": 0.0},
             "latency": pd.DataFrame(),
@@ -651,8 +746,11 @@ def get_live_pipeline_metrics(url: str | None = None) -> str:
     try:
         res = requests.get(target, timeout=2)
         res.raise_for_status()
+        _log_metrics_fetch(target, res.status_code, res.text or "")
         return res.text
     except Exception as exc:  # pragma: no cover - network
+        status_code = getattr(locals().get("res", None), "status_code", None)
+        _log_metrics_fetch(target, status_code, getattr(locals().get("res", None), "text", "") or "")
         return f"Pipeline Offline: {exc}"
 
 
@@ -664,8 +762,11 @@ def fetch_from_pipeline() -> str:
     try:
         r = requests.get(url, timeout=5)
         r.raise_for_status()
+        _log_metrics_fetch(url, r.status_code, r.text or "")
         return r.text or ""
     except Exception as exc:
+        status_code = getattr(locals().get("r", None), "status_code", None)
+        _log_metrics_fetch(url, status_code, getattr(locals().get("r", None), "text", "") or "")
         return f"No data in pipeline yet... ({exc})"
 
 
@@ -1240,12 +1341,10 @@ def render_schema_inventory() -> None:
 
 
 def render_admin_dashboard() -> None:
-    st_autorefresh(interval=2000, key="admin_dashboard_refresh")
     st.info("Temporarily disabled while storage is being migrated.")
 
 
 def render_user_dashboard(username: str) -> None:
-    st_autorefresh(interval=5000, key="dashboard_autorefresh")
     st.title("Dashboard")
     subtitle = getattr(st.session_state.get("user"), "email", None) or username or "user"
     st.caption(subtitle)
@@ -1539,7 +1638,6 @@ def _render_node_drilldown(filters: FilterContext) -> None:
 
 def show_node_manager():
     render_hero("SentriNode Node Manager")
-    st_autorefresh(interval=2000, key="node_manager_refresh")
     st.text_input("Tenant slug", key="active_tenant_slug")
     st.text_input("Raw API key (header X-SentriNode-Key)", key="ingest_raw_key", type="password")
 
@@ -1774,9 +1872,11 @@ def show_settings():
 # --- MAIN NAVIGATION ---
 if not st.session_state.get("user") or not st.session_state.get("access_token"):
     _show_pipeline_debug_sidebar()
+    _setup_auto_refresh_controls()
     render_auth_portal()
 else:
     _show_pipeline_debug_sidebar()
+    _setup_auto_refresh_controls()
     sidebar_option = st.sidebar.radio("Navigation", ("Dashboard", "Node Manager", "API Keys", "Settings"))
     st.sidebar.caption("Session Controls")
     if st.sidebar.button("Logout"):

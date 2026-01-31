@@ -11,3 +11,4 @@ python-dotenv>=1.0
 supabase>=2.4
 fastapi>=0.110
 uvicorn[standard]>=0.24
+prometheus_client>=0.20

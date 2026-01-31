@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY api.py /app/api.py
+COPY start_api.sh /app/start_api.sh
+RUN chmod +x /app/start_api.sh
+RUN python -m py_compile /app/api.py
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "/app/start_api.sh"]
+
