@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 
 logging.basicConfig(level=logging.INFO)
@@ -35,8 +35,8 @@ def healthz() -> dict[str, bool]:
 
 
 @app.get("/health")
-def health() -> dict[str, bool]:
-    return {"ok": True}
+def health() -> PlainTextResponse:
+    return PlainTextResponse("ok", status_code=200)
 
 
 @app.get("/")

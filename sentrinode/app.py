@@ -23,6 +23,31 @@ except Exception:  # pragma: no cover - optional dependency
 
 st.set_page_config(layout="wide")
 
+# Simple health page: if Streamlit is hit at /health, render "ok" and stop.
+def _maybe_render_healthcheck() -> None:
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx  # type: ignore
+    except Exception:
+        return
+
+    ctx = get_script_run_ctx()
+    if not ctx:
+        return
+
+    request = getattr(ctx, "request", None)
+    path = None
+    for attr in ("path", "path_info"):
+        path = getattr(request, attr, None)
+        if path:
+            break
+
+    if path == "/health":
+        st.write("ok")
+        st.stop()
+
+
+_maybe_render_healthcheck()
+
 # ---------------------------------------------------------------------------
 # Schema Inventory (auto-updated at runtime in render_schema_inventory panel)
 # Labels & Relationships (assumptions until discovered):

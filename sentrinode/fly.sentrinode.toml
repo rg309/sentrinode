@@ -10,10 +10,10 @@ primary_region = 'iad'
   dockerfile = 'Dockerfile.ui'
 
 [processes]
-  app = 'streamlit run /app/app.py --server.address=0.0.0.0 --server.port 8501'
+  app = 'streamlit run /app/app.py --server.address=0.0.0.0 --server.port 8080'
 
 [http_service]
-  internal_port = 8501
+  internal_port = 8080
   force_https = true
   auto_stop_machines = 'off'
   auto_start_machines = true
