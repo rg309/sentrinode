@@ -70,15 +70,9 @@ def health() -> PlainTextResponse:
     return PlainTextResponse("ok", status_code=200)
 
 
-@app.get("/")
-def root() -> HTMLResponse:
-    return HTMLResponse(
-        "<!doctype html><html><head><title>SentriNode API</title></head>"
-        "<body><h1>SentriNode API</h1>"
-        "<ul><li><a href=\"/docs\">/docs</a></li>"
-        "<li><a href=\"/metrics\">/metrics</a></li></ul></body></html>",
-        status_code=200,
-    )
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/metrics")
