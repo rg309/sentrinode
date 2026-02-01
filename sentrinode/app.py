@@ -451,21 +451,15 @@ def _show_pipeline_debug_sidebar() -> None:
         calls_candidates = {
             "spanmetrics_calls_total",
             "spanmetrics_calls_created",
-            "calls_total",
-            "calls_created",
         }
         matched_calls = sorted(n for n in names if n in calls_candidates)
 
-        # Generic histogram detection for spanmetrics_*_bucket or duration/latency buckets with matching _sum/_count.
+        # Histogram detection for spanmetrics_duration_milliseconds_* with matching _sum/_count.
         histogram_bases: dict[str, dict[str, bool]] = {}
         for name in names:
             if not name.endswith("_bucket"):
                 continue
-            if not (
-                name.startswith("spanmetrics_")
-                or name.startswith("duration_")
-                or name.startswith("latency_")
-            ):
+            if name != "spanmetrics_duration_milliseconds_bucket":
                 continue
             base = name[: -len("_bucket")]
             histogram_bases.setdefault(base, {"bucket": False, "sum": False, "count": False})
@@ -510,7 +504,7 @@ def _show_pipeline_debug_sidebar() -> None:
             st.sidebar.write("last fetch time:", dbg["last_fetch"])
             st.sidebar.write("status:", dbg["status"])
             st.sidebar.write("metrics fetch url:", dbg.get("last_metrics_url") or "(not fetched)")
-            st.sidebar.write("metrics calls_total:", dbg.get("last_metrics_calls_total"))
+            st.sidebar.write("metrics spanmetrics_calls_total:", dbg.get("last_metrics_calls_total"))
             st.sidebar.write(
                 "spanmetrics present:",
                 {
@@ -713,18 +707,31 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
 def _extract_calls_total(text: str) -> float | None:
     if not text:
         return None
-    for pattern in (
-        r"^spanmetrics_calls_total\s+([0-9eE+\-\.]+)\s*$",
-        r"^calls_total\s+([0-9eE+\-\.]+)\s*$",
-    ):
-        match = re.search(pattern, text, flags=re.MULTILINE)
-        if not match:
+    total = 0.0
+    found = False
+    for line in text.splitlines():
+        if not line or line.startswith("#") or " " not in line:
+            continue
+        metric_part, value_part = line.split(None, 1)
+        name = metric_part.split("{", 1)[0]
+        if name != "spanmetrics_calls_total":
+            continue
+        labels: dict[str, str] = {}
+        if "{" in metric_part:
+            _, label_blob = metric_part.split("{", 1)
+            label_blob = label_blob.rstrip("}")
+            labels = _parse_labels(label_blob)
+        if labels.get("service_name") != "sentrinode-api":
+            continue
+        if labels.get("span_kind") != "SPAN_KIND_SERVER":
             continue
         try:
-            return float(match.group(1))
+            value = float(value_part.strip().split()[0])
         except ValueError:
             continue
-    return None
+        total += value
+        found = True
+    return total if found else None
 
 
 def _update_pipeline_debug(**kwargs: Any) -> None:
@@ -743,7 +750,7 @@ def _log_metrics_fetch(url: str, status_code: int | None, text: str) -> None:
         last_metrics_calls_total=calls_total,
     )
     print(
-        f"METRICS_FETCH url={url or '(not set)'} status={status_code} calls_total={calls_total}",
+        f"METRICS_FETCH url={url or '(not set)'} status={status_code} spanmetrics_calls_total={calls_total}",
         flush=True,
     )
 
@@ -888,14 +895,14 @@ def _parse_labels(label_blob: str) -> dict[str, str]:
 
 
 def _parse_spanmetrics(text: str) -> dict[str, Any]:
-    calls_entries: list[tuple[dict[str, str], float]] = []
-    duration_buckets: dict[frozenset[tuple[str, str]], list[tuple[float, float]]] = {}
-    duration_sum: dict[frozenset[tuple[str, str]], float] = {}
-    duration_count: dict[frozenset[tuple[str, str]], float] = {}
+    now = datetime.utcnow()
+    target_service = "sentrinode-api"
+    target_span_kind = "SPAN_KIND_SERVER"
 
-    def _is_metric(found: str, canonical: str) -> bool:
-        return found == canonical or found.endswith("_" + canonical)
-
+    calls_by_span: dict[str, float] = {}
+    status_by_span: dict[str, set[str]] = {}
+    duration_buckets_by_span: dict[str, list[tuple[float, float]]] = {}
+    duration_count_by_span: dict[str, float] = {}
 
     for line in text.splitlines():
         if not line or line.startswith("#") or " " not in line:
@@ -912,12 +919,19 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
         else:
             name, labels = metric_part, {}
 
-        key_items = tuple(sorted((k, v) for k, v in labels.items() if k != "le"))
-        key = frozenset(key_items)
+        if labels.get("service_name") != target_service:
+            continue
+        if labels.get("span_kind") != target_span_kind:
+            continue
 
-        if _is_metric(name, "calls"):
-            calls_entries.append((labels, value))
-        elif _is_metric(name, "duration_bucket"):
+        span_name = labels.get("span_name") or labels.get("span.name") or "span"
+        status = labels.get("status_code") or labels.get("status.code") or ""
+
+        if name == "spanmetrics_calls_total":
+            calls_by_span[span_name] = calls_by_span.get(span_name, 0.0) + value
+            if status:
+                status_by_span.setdefault(span_name, set()).add(status)
+        elif name == "spanmetrics_duration_milliseconds_bucket":
             le_val = labels.get("le")
             if le_val is None:
                 continue
@@ -925,53 +939,55 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
                 le = float(le_val)
             except ValueError:
                 continue
-            duration_buckets.setdefault(key, []).append((le, value))
-        elif _is_metric(name, "duration_sum"):
-            duration_sum[key] = value
-        elif _is_metric(name, "duration_count"):
-            duration_count[key] = value
+            duration_buckets_by_span.setdefault(span_name, []).append((le, value))
+        elif name == "spanmetrics_duration_milliseconds_count":
+            duration_count_by_span[span_name] = value
 
-    now = datetime.utcnow()
-    rows = []
-    total_calls = 0.0
-    total_errors = 0.0
-    for labels, count in calls_entries:
-        service = labels.get("service.name") or "unknown"
-        span_name = labels.get("span.name") or labels.get("operation") or "span"
-        status = labels.get("status.code") or labels.get("status_code") or ""
-        total_calls += count
-        if status and status.lower() != "ok":
-            total_errors += count
-        rows.append(
-            {
-                "service": service,
-                "span": span_name,
-                "status": status or "unset",
-                "calls": count,
-            }
-        )
-
-    p95_ms = 0.0
-    for key, buckets in duration_buckets.items():
-        total = duration_count.get(key, 0.0)
-        if total <= 0:
-            continue
+    def _estimate_quantile_ms(buckets: list[tuple[float, float]], total: float, quantile: float) -> float:
+        if total <= 0 or not buckets:
+            return 0.0
+        threshold = quantile * total
         buckets_sorted = sorted(buckets, key=lambda x: x[0])
-        threshold = 0.95 * total
-        cumulative = 0.0
         est = buckets_sorted[-1][0]
         for le, val in buckets_sorted:
-            cumulative = val
-            if cumulative >= threshold:
+            if val >= threshold:
                 est = le
                 break
-        p95_ms = max(p95_ms, est * 1000.0)
+        return est
+
+    total_calls = sum(calls_by_span.values())
+    total_errors = 0.0
+    for span, count in calls_by_span.items():
+        statuses = status_by_span.get(span, set())
+        if any(status not in {"STATUS_CODE_OK", "STATUS_CODE_UNSET"} for status in statuses):
+            total_errors += count
+
+    p50_ms = 0.0
+    p95_ms = 0.0
+    for span_name, buckets in duration_buckets_by_span.items():
+        total = duration_count_by_span.get(span_name, 0.0)
+        p50_ms = max(p50_ms, _estimate_quantile_ms(buckets, total, 0.5))
+        p95_ms = max(p95_ms, _estimate_quantile_ms(buckets, total, 0.95))
 
     error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0.0
-    kpis = {"p50": 0.0, "p95": p95_ms, "error_rate": error_rate, "rpm": total_calls}
+    kpis = {"p50": p50_ms, "p95": p95_ms, "error_rate": error_rate, "rpm": total_calls}
 
-    latency_df = pd.DataFrame({"timestamp": [now], "latency_p50": [0.0], "latency_p95": [p95_ms]})
-    top_services = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "span", "status", "calls"])
+    latency_sample = {"timestamp": now, "latency_p50": p50_ms, "latency_p95": p95_ms}
+    history = st.session_state.get("latency_history", [])
+    new_history = (history + [latency_sample])[-120:]
+    st.session_state["latency_history"] = new_history
+    latency_df = pd.DataFrame(new_history)
+
+    rows = [
+        {"service": target_service, "span": span_name, "status": ",".join(sorted(status_by_span.get(span_name, set()))), "calls": calls}
+        for span_name, calls in calls_by_span.items()
+    ]
+    top_services = (
+        pd.DataFrame(rows).sort_values(by="calls", ascending=False)
+        if rows
+        else pd.DataFrame(columns=["service", "span", "status", "calls"])
+    )
+
     events = pd.DataFrame(
         {
             "timestamp": [now],
@@ -979,7 +995,22 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
             "status": ["ok"],
         }
     )
-    return {"kpis": kpis, "latency": latency_df, "top_services": top_services, "events": events}
+
+    top_routes = (
+        top_services[["span", "calls"]].head(5).to_dict("records")
+        if not top_services.empty
+        else []
+    )
+
+    return {
+        "kpis": kpis,
+        "latency": latency_df,
+        "top_services": top_services,
+        "events": events,
+        "last_fetch_time": now,
+        "total_server_calls": total_calls,
+        "top_routes": top_routes,
+    }
 
 
 def _generate_raw_api_key() -> str:
@@ -1448,13 +1479,26 @@ def render_user_dashboard(username: str) -> None:
     time_label, start, end = _selected_time_range()
     demo_enabled = st.checkbox("Demo mode", value=st.session_state.get("dashboard_demo", False), key="dashboard_demo")
     st.button("Refresh metrics", key="refresh_metrics")
+    if not demo_enabled:
+        st_autorefresh(interval=15000, key="metrics_auto_poll")
     if demo_enabled:
         data = _generate_demo_dashboard_data(start, end)
     else:
-        data = _fetch_live_pipeline_data()
+        data = dict(_fetch_live_pipeline_data())
     _render_kpi_cards(data["kpis"])
     _render_latency_chart(data.get("latency"), demo_enabled)
     _render_dashboard_tables(data.get("top_services"), data.get("events"), demo_enabled)
+    if not demo_enabled:
+        st.subheader("Live Metrics Debug")
+        st.write("metrics_url:", (LIVE_PIPELINE_METRICS_URL or "(not set)"))
+        st.write("lastFetchTime:", data.get("last_fetch_time"))
+        st.write("total SERVER calls:", data.get("total_server_calls", 0.0))
+        top_routes = data.get("top_routes") or []
+        if top_routes:
+            st.write("top 5 routes by SERVER calls:")
+            st.dataframe(pd.DataFrame(top_routes), hide_index=True, use_container_width=True)
+        else:
+            st.write("top 5 routes by SERVER calls: (none)")
     st.subheader("Live Pipeline Stream")
     st.text(fetch_pipeline_data())
 
