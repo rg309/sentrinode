@@ -70,11 +70,6 @@ def health() -> PlainTextResponse:
     return PlainTextResponse("ok", status_code=200)
 
 
-@app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs")
-
-
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -94,3 +89,8 @@ async def ingest(request: Request) -> JSONResponse:
 
     logger.info("ingest payload=%s", json.dumps(payload, separators=(",", ":"), sort_keys=True))
     return JSONResponse(status_code=202, content={"accepted": True})
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
