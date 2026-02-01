@@ -139,28 +139,33 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 INGEST_BASE_URL = (os.getenv("INGEST_BASE_URL") or "http://localhost:8000").rstrip("/")
 
-def _resolve_pipeline_metrics_url(base_url: str) -> str:
-    if not base_url:
+def _normalize_url(value: str) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def _join_url(base: str, path: str) -> str:
+    if not base:
         return ""
-    if base_url.endswith("/metrics"):
-        return base_url
-    return f"{base_url}/metrics"
+    if not path:
+        return base
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
-PIPELINE_BASE_URL = (os.getenv("PIPELINE_BASE_URL") or "").strip().rstrip("/")
-PIPELINE_METRICS_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip().rstrip("/")
-if not PIPELINE_BASE_URL and PIPELINE_METRICS_URL:
-    PIPELINE_BASE_URL = PIPELINE_METRICS_URL.removesuffix("/metrics")
-PIPELINE_METRICS_URL = _resolve_pipeline_metrics_url(PIPELINE_METRICS_URL or PIPELINE_BASE_URL)
-PIPELINE_INGEST_URL = (os.getenv("PIPELINE_INGEST_URL") or "").strip().rstrip("/")
+PIPELINE_BASE_URL = _normalize_url(os.getenv("PIPELINE_BASE_URL") or "")
+PIPELINE_METRICS_URL = _normalize_url(os.getenv("PIPELINE_METRICS_URL") or "")
+PIPELINE_INGEST_URL = _normalize_url(os.getenv("PIPELINE_INGEST_URL") or "")
+PIPELINE_METRICS_URL_SOURCE = "env" if PIPELINE_METRICS_URL else "not set"
+PIPELINE_INGEST_URL_SOURCE = "env" if PIPELINE_INGEST_URL else ("base" if PIPELINE_BASE_URL else "not set")
 if not PIPELINE_INGEST_URL and PIPELINE_BASE_URL:
-    PIPELINE_INGEST_URL = f"{PIPELINE_BASE_URL}/ingest"
+    PIPELINE_INGEST_URL = _join_url(PIPELINE_BASE_URL, "ingest")
 LIVE_PIPELINE_METRICS_URL = PIPELINE_METRICS_URL
 print("BOOT_OK", flush=True)
 print(f"SERVER=streamlit PORT={os.getenv('PORT', '8080')}", flush=True)
-print("PIPELINE_METRICS_URL=", PIPELINE_BASE_URL, flush=True)
+print("PIPELINE_BASE_URL=", PIPELINE_BASE_URL, flush=True)
 print("PIPELINE_METRICS_URL_RESOLVED=", LIVE_PIPELINE_METRICS_URL or "", flush=True)
 print("PIPELINE_INGEST_URL_RESOLVED=", PIPELINE_INGEST_URL or "", flush=True)
+print("PIPELINE_METRICS_URL_SOURCE=", PIPELINE_METRICS_URL_SOURCE, flush=True)
+print("PIPELINE_INGEST_URL_SOURCE=", PIPELINE_INGEST_URL_SOURCE, flush=True)
 
 if LIVE_PIPELINE_METRICS_URL:
     try:
@@ -383,11 +388,14 @@ def _supabase_user_headers(access_token: str | None) -> dict[str, str]:
 
 def _post_pipeline_event(payload: dict[str, Any]) -> tuple[bool, str | None]:
     if not PIPELINE_INGEST_URL:
-        return False, "PIPELINE_METRICS_URL not set"
+        return False, "PIPELINE_INGEST_URL not set"
+    _log_ingest_post(PIPELINE_INGEST_URL, None, None)
     try:
         res = requests.post(PIPELINE_INGEST_URL, json=payload, timeout=5)
     except Exception as exc:  # pragma: no cover - network
+        _log_ingest_post(PIPELINE_INGEST_URL, None, repr(exc))
         return False, f"Failed to post event: {exc}"
+    _log_ingest_post(PIPELINE_INGEST_URL, res.status_code, None)
     if res.status_code not in (200, 202):
         return False, f"Ingest responded with {res.status_code}: {res.text}"
     return True, None
@@ -412,8 +420,12 @@ def _show_pipeline_debug_sidebar() -> None:
 
     base_target = (PIPELINE_BASE_URL or "").strip()
     target = (LIVE_PIPELINE_METRICS_URL or "").strip()
+    ingest_target = (PIPELINE_INGEST_URL or "").strip()
     st.sidebar.write("PIPELINE_BASE_URL:", base_target or "(not set)")
     st.sidebar.write("PIPELINE_METRICS_URL:", target or "(not set)")
+    st.sidebar.write("PIPELINE_INGEST_URL:", ingest_target or "(not set)")
+    st.sidebar.write("PIPELINE_METRICS_URL_SOURCE:", PIPELINE_METRICS_URL_SOURCE)
+    st.sidebar.write("PIPELINE_INGEST_URL_SOURCE:", PIPELINE_INGEST_URL_SOURCE)
 
     manual_refresh = st.sidebar.button("Refresh metrics", key="debug_refresh_metrics")
 
@@ -425,6 +437,12 @@ def _show_pipeline_debug_sidebar() -> None:
             "status": None,
             "error": None,
             "preview": "",
+            "last_metrics_url": None,
+            "last_metrics_status": None,
+            "last_metrics_calls_total": None,
+            "last_ingest_url": None,
+            "last_ingest_status": None,
+            "last_ingest_error": None,
         },
     )
 
@@ -486,10 +504,13 @@ def _show_pipeline_debug_sidebar() -> None:
             dbg["has_duration_count"] = detected["has_histogram"]
             dbg["matched_calls"] = detected["matched_calls"]
             dbg["matched_histograms"] = detected["matched_histograms"]
+            dbg["last_metrics_url"] = target
 
             # Keep the first 300 chars visible even if it contains newlines.
             st.sidebar.write("last fetch time:", dbg["last_fetch"])
             st.sidebar.write("status:", dbg["status"])
+            st.sidebar.write("metrics fetch url:", dbg.get("last_metrics_url") or "(not fetched)")
+            st.sidebar.write("metrics calls_total:", dbg.get("last_metrics_calls_total"))
             st.sidebar.write(
                 "spanmetrics present:",
                 {
@@ -514,6 +535,8 @@ def _show_pipeline_debug_sidebar() -> None:
                         "status": r.status_code,
                     }
                 )
+                st.sidebar.write("ingest post url:", dbg.get("last_ingest_url") or "(not posted)")
+                st.sidebar.write("ingest status:", dbg.get("last_ingest_status"))
                 if ok:
                     st.sidebar.success("Posted event to ingest.")
                 else:
@@ -525,8 +548,10 @@ def _show_pipeline_debug_sidebar() -> None:
             dbg["status"] = None
             dbg["error"] = repr(exc)
             dbg["preview"] = ""
+            dbg["last_metrics_url"] = target
             st.sidebar.write("last fetch time:", dbg["last_fetch"])
             st.sidebar.write("error:", dbg["error"])
+            st.sidebar.write("metrics fetch url:", dbg.get("last_metrics_url") or "(not fetched)")
     else:
         dbg["last_fetch"] = None
         dbg["status"] = None
@@ -702,12 +727,37 @@ def _extract_calls_total(text: str) -> float | None:
     return None
 
 
+def _update_pipeline_debug(**kwargs: Any) -> None:
+    try:
+        dbg = st.session_state.setdefault("pipeline_debug", {})
+        dbg.update(kwargs)
+    except Exception:
+        return
+
+
 def _log_metrics_fetch(url: str, status_code: int | None, text: str) -> None:
     calls_total = _extract_calls_total(text)
+    _update_pipeline_debug(
+        last_metrics_url=url or "(not set)",
+        last_metrics_status=status_code,
+        last_metrics_calls_total=calls_total,
+    )
     print(
         f"METRICS_FETCH url={url or '(not set)'} status={status_code} calls_total={calls_total}",
         flush=True,
     )
+
+
+def _log_ingest_post(url: str, status_code: int | None, error: str | None) -> None:
+    _update_pipeline_debug(
+        last_ingest_url=url or "(not set)",
+        last_ingest_status=status_code,
+        last_ingest_error=error,
+    )
+    message = f"INGEST_POST url={url or '(not set)'} status={status_code}"
+    if error:
+        message = f"{message} error={error}"
+    print(message, flush=True)
 
 
 def fetch_live_pipeline() -> str:
