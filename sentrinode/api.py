@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sentrinode-api")
 
 app = FastAPI(title="SentriNode API", version="0.1.0")
+print("SERVER=fastapi PORT=8080", flush=True)
 
 # Module-scoped counters ensure values persist across requests for a single process.
 SPANMETRICS_CALLS_TOTAL = Counter(
