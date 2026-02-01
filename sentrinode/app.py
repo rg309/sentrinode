@@ -440,6 +440,9 @@ def _show_pipeline_debug_sidebar() -> None:
             "last_metrics_url": None,
             "last_metrics_status": None,
             "last_metrics_calls_total": None,
+            "last_metrics_text_length": None,
+            "last_metrics_has_server_spans": None,
+            "last_metrics_calls_line_count": None,
             "last_ingest_url": None,
             "last_ingest_status": None,
             "last_ingest_error": None,
@@ -505,6 +508,9 @@ def _show_pipeline_debug_sidebar() -> None:
             st.sidebar.write("status:", dbg["status"])
             st.sidebar.write("metrics fetch url:", dbg.get("last_metrics_url") or "(not fetched)")
             st.sidebar.write("metrics spanmetrics_calls_total:", dbg.get("last_metrics_calls_total"))
+            st.sidebar.write("metrics text length:", dbg.get("last_metrics_text_length"))
+            st.sidebar.write("has SERVER spans:", dbg.get("last_metrics_has_server_spans"))
+            st.sidebar.write("calls_total line count:", dbg.get("last_metrics_calls_line_count"))
             st.sidebar.write(
                 "spanmetrics present:",
                 {
@@ -546,6 +552,9 @@ def _show_pipeline_debug_sidebar() -> None:
             st.sidebar.write("last fetch time:", dbg["last_fetch"])
             st.sidebar.write("error:", dbg["error"])
             st.sidebar.write("metrics fetch url:", dbg.get("last_metrics_url") or "(not fetched)")
+            st.sidebar.write("metrics text length:", dbg.get("last_metrics_text_length"))
+            st.sidebar.write("has SERVER spans:", dbg.get("last_metrics_has_server_spans"))
+            st.sidebar.write("calls_total line count:", dbg.get("last_metrics_calls_line_count"))
     else:
         dbg["last_fetch"] = None
         dbg["status"] = None
@@ -706,9 +715,8 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
 
 def _extract_calls_total(text: str) -> float | None:
     if not text:
-        return None
+        return 0.0
     total = 0.0
-    found = False
     for line in text.splitlines():
         if not line or line.startswith("#") or " " not in line:
             continue
@@ -730,8 +738,7 @@ def _extract_calls_total(text: str) -> float | None:
         except ValueError:
             continue
         total += value
-        found = True
-    return total if found else None
+    return total
 
 
 def _update_pipeline_debug(**kwargs: Any) -> None:
@@ -744,10 +751,20 @@ def _update_pipeline_debug(**kwargs: Any) -> None:
 
 def _log_metrics_fetch(url: str, status_code: int | None, text: str) -> None:
     calls_total = _extract_calls_total(text)
+    text_len = len(text or "")
+    has_server_spans = 'span_kind="SPAN_KIND_SERVER"' in (text or "")
+    calls_line_count = 0
+    if text:
+        for line in text.splitlines():
+            if line.startswith("spanmetrics_calls_total{"):
+                calls_line_count += 1
     _update_pipeline_debug(
         last_metrics_url=url or "(not set)",
         last_metrics_status=status_code,
         last_metrics_calls_total=calls_total,
+        last_metrics_text_length=text_len,
+        last_metrics_has_server_spans=has_server_spans,
+        last_metrics_calls_line_count=calls_line_count,
     )
     print(
         f"METRICS_FETCH url={url or '(not set)'} status={status_code} spanmetrics_calls_total={calls_total}",
@@ -902,7 +919,12 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
     calls_by_span: dict[str, float] = {}
     status_by_span: dict[str, set[str]] = {}
     duration_buckets_by_span: dict[str, list[tuple[float, float]]] = {}
+    duration_sum_by_span: dict[str, float] = {}
     duration_count_by_span: dict[str, float] = {}
+
+    metrics_text_length = len(text or "")
+    calls_line_count = 0
+    has_server_spans = False
 
     for line in text.splitlines():
         if not line or line.startswith("#") or " " not in line:
@@ -919,11 +941,15 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
         else:
             name, labels = metric_part, {}
 
+        if name == "spanmetrics_calls_total":
+            calls_line_count += 1
+
         if labels.get("service_name") != target_service:
             continue
         if labels.get("span_kind") != target_span_kind:
             continue
 
+        has_server_spans = True
         span_name = labels.get("span_name") or labels.get("span.name") or "span"
         status = labels.get("status_code") or labels.get("status.code") or ""
 
@@ -940,6 +966,8 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
             except ValueError:
                 continue
             duration_buckets_by_span.setdefault(span_name, []).append((le, value))
+        elif name == "spanmetrics_duration_milliseconds_sum":
+            duration_sum_by_span[span_name] = value
         elif name == "spanmetrics_duration_milliseconds_count":
             duration_count_by_span[span_name] = value
 
@@ -968,6 +996,17 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
         total = duration_count_by_span.get(span_name, 0.0)
         p50_ms = max(p50_ms, _estimate_quantile_ms(buckets, total, 0.5))
         p95_ms = max(p95_ms, _estimate_quantile_ms(buckets, total, 0.95))
+
+    avg_ms = 0.0
+    for span_name, total in duration_count_by_span.items():
+        if total <= 0:
+            continue
+        sum_val = duration_sum_by_span.get(span_name)
+        if sum_val is None:
+            continue
+        avg_ms = max(avg_ms, sum_val / total)
+    if p50_ms <= 0 and avg_ms > 0:
+        p50_ms = avg_ms
 
     error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0.0
     kpis = {"p50": p50_ms, "p95": p95_ms, "error_rate": error_rate, "rpm": total_calls}
@@ -1008,6 +1047,9 @@ def _parse_spanmetrics(text: str) -> dict[str, Any]:
         "top_services": top_services,
         "events": events,
         "last_fetch_time": now,
+        "metrics_text_length": metrics_text_length,
+        "has_server_spans": has_server_spans,
+        "calls_line_count": calls_line_count,
         "total_server_calls": total_calls,
         "top_routes": top_routes,
     }
@@ -1492,7 +1534,10 @@ def render_user_dashboard(username: str) -> None:
         st.subheader("Live Metrics Debug")
         st.write("metrics_url:", (LIVE_PIPELINE_METRICS_URL or "(not set)"))
         st.write("lastFetchTime:", data.get("last_fetch_time"))
+        st.write("metricsText length:", data.get("metrics_text_length"))
+        st.write("hasServerSpans:", data.get("has_server_spans"))
         st.write("total SERVER calls:", data.get("total_server_calls", 0.0))
+        st.write("calls_total line count:", data.get("calls_line_count"))
         top_routes = data.get("top_routes") or []
         if top_routes:
             st.write("top 5 routes by SERVER calls:")
