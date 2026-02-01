@@ -1,0 +1,33 @@
+app = "sentrinode-collector"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 9464
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 4318
+
+  [[services.ports]]
+    port = 4318
+    handlers = ["tls", "http"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 4317
+
+  [[services.ports]]
+    port = 4317
+    handlers = ["tls"]

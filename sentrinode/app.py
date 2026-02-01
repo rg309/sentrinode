@@ -147,9 +147,14 @@ def _resolve_pipeline_metrics_url(base_url: str) -> str:
     return f"{base_url}/metrics"
 
 
-PIPELINE_BASE_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip().rstrip("/")
-PIPELINE_METRICS_URL = _resolve_pipeline_metrics_url(PIPELINE_BASE_URL)
-PIPELINE_INGEST_URL = f"{PIPELINE_BASE_URL}/ingest" if PIPELINE_BASE_URL else ""
+PIPELINE_BASE_URL = (os.getenv("PIPELINE_BASE_URL") or "").strip().rstrip("/")
+PIPELINE_METRICS_URL = (os.getenv("PIPELINE_METRICS_URL") or "").strip().rstrip("/")
+if not PIPELINE_BASE_URL and PIPELINE_METRICS_URL:
+    PIPELINE_BASE_URL = PIPELINE_METRICS_URL.removesuffix("/metrics")
+PIPELINE_METRICS_URL = _resolve_pipeline_metrics_url(PIPELINE_METRICS_URL or PIPELINE_BASE_URL)
+PIPELINE_INGEST_URL = (os.getenv("PIPELINE_INGEST_URL") or "").strip().rstrip("/")
+if not PIPELINE_INGEST_URL and PIPELINE_BASE_URL:
+    PIPELINE_INGEST_URL = f"{PIPELINE_BASE_URL}/ingest"
 LIVE_PIPELINE_METRICS_URL = PIPELINE_METRICS_URL
 print("BOOT_OK", flush=True)
 print(f"SERVER=streamlit PORT={os.getenv('PORT', '8080')}", flush=True)
@@ -425,13 +430,24 @@ def _show_pipeline_debug_sidebar() -> None:
 
     def _detect_spanmetrics(metrics_text: str) -> dict[str, Any]:
         names = _extract_metric_names(metrics_text)
-        calls_candidates = {"spanmetrics_calls_total", "spanmetrics_calls_created"}
+        calls_candidates = {
+            "spanmetrics_calls_total",
+            "spanmetrics_calls_created",
+            "calls_total",
+            "calls_created",
+        }
         matched_calls = sorted(n for n in names if n in calls_candidates)
 
-        # Generic histogram detection for spanmetrics_*_bucket with matching _sum/_count.
+        # Generic histogram detection for spanmetrics_*_bucket or duration/latency buckets with matching _sum/_count.
         histogram_bases: dict[str, dict[str, bool]] = {}
         for name in names:
-            if not name.startswith("spanmetrics_") or not name.endswith("_bucket"):
+            if not name.endswith("_bucket"):
+                continue
+            if not (
+                name.startswith("spanmetrics_")
+                or name.startswith("duration_")
+                or name.startswith("latency_")
+            ):
                 continue
             base = name[: -len("_bucket")]
             histogram_bases.setdefault(base, {"bucket": False, "sum": False, "count": False})
@@ -672,13 +688,18 @@ def _fetch_node_detail(node_name: str) -> tuple[dict[str, Any] | None, str | Non
 def _extract_calls_total(text: str) -> float | None:
     if not text:
         return None
-    match = re.search(r"^spanmetrics_calls_total\s+([0-9eE+\-\.]+)\s*$", text, flags=re.MULTILINE)
-    if not match:
-        return None
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
+    for pattern in (
+        r"^spanmetrics_calls_total\s+([0-9eE+\-\.]+)\s*$",
+        r"^calls_total\s+([0-9eE+\-\.]+)\s*$",
+    ):
+        match = re.search(pattern, text, flags=re.MULTILINE)
+        if not match:
+            continue
+        try:
+            return float(match.group(1))
+        except ValueError:
+            continue
+    return None
 
 
 def _log_metrics_fetch(url: str, status_code: int | None, text: str) -> None:
