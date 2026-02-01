@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -71,8 +71,14 @@ def health() -> PlainTextResponse:
 
 
 @app.get("/")
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs", status_code=302)
+def root() -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><html><head><title>SentriNode API</title></head>"
+        "<body><h1>SentriNode API</h1>"
+        "<ul><li><a href=\"/docs\">/docs</a></li>"
+        "<li><a href=\"/metrics\">/metrics</a></li></ul></body></html>",
+        status_code=200,
+    )
 
 
 @app.get("/metrics")
